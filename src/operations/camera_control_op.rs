@@ -1,62 +1,62 @@
-use crate::core::camera_manager::{CameraManager, parse_camera_names_arg};
+use crate::config_loader::MasterConfig;
+use crate::core::camera_manager::CameraManager;
 use crate::camera::camera_controller::CameraController;
 use crate::errors::AppError;
+use crate::operations::op_helper::run_generic_camera_op;
 use clap::ArgMatches;
-use log::{info, error, warn};
-use futures::future::join_all;
+use log::{info, error};
 
 pub async fn handle_control_camera_cli(
-    _master_config: &crate::config_loader::MasterConfig, // May not be needed directly, but good to have access
+    master_config: &MasterConfig,
     camera_manager: &CameraManager,
     args: &ArgMatches,
 ) -> Result<(), AppError> {
-    info!("Handling camera-control command...");
-
-    let action_str = args.get_one::<String>("action").ok_or_else(|| AppError::Operation("Missing --action argument for control command".to_string()))?;
+    let action_str = args.get_one::<String>("action").ok_or_else(|| {
+        AppError::Operation("Missing --action argument for control command".to_string())
+    })?;
     let enable = match action_str.to_lowercase().as_str() {
         "enable" => true,
         "disable" => false,
-        _ => return Err(AppError::Operation(format!("Invalid action '{}'. Must be 'enable' or 'disable'.", action_str))),
+        _ => {
+            return Err(AppError::Operation(format!(
+                "Invalid action '{}'. Must be 'enable' or 'disable'.",
+                action_str
+            )))
+        }
     };
 
     let camera_controller = CameraController::new();
 
-    let specific_cameras_arg = args.get_one::<String>("cameras");
-    let camera_names_to_process = parse_camera_names_arg(specific_cameras_arg);
+    run_generic_camera_op(
+        master_config,
+        camera_manager,
+        args,
+        "Camera Control",
+        "output",
+        None,
+        move |cam_entity_arc, _app_settings_arc, _operation_output_dir| {
+            let controller_clone = camera_controller.clone();
+            let enable_clone = enable;
 
-    let cameras_to_target = match camera_names_to_process {
-        Some(ref names) => camera_manager.get_cameras_by_names(names).await,
-        None => camera_manager.get_all_cameras().await,
-    };
+            async move {
+                let cam_entity = cam_entity_arc.lock().await;
+                let cam_name = &cam_entity.config.name;
+                let action_verb = if enable_clone { "enable" } else { "disable" };
+                
+                info!("Attempting to {} camera: '{}'", action_verb, cam_name);
 
-    if cameras_to_target.is_empty() {
-        if let Some(names) = camera_names_to_process {
-            warn!("No cameras found matching names: {:?}. Please check your camera names and configuration.", names);
-        } else {
-            warn!("No cameras configured or matched for control operation.");
-        }
-        return Ok(());
-    }
-
-    let mut control_tasks = Vec::new();
-
-    for cam_entity_arc in cameras_to_target {
-        let controller_clone = camera_controller.clone(); // Assuming CameraController is Clone or Arc-able
-        // let cam_name_clone = cam_entity_arc.lock().await.config.name.clone(); // Done in task
-
-        let task = tokio::spawn(async move {
-            let cam_entity = cam_entity_arc.lock().await;
-            info!("Attempting to {} camera: '{}'", if enable {"enable"} else {"disable"}, cam_entity.config.name);
-            match controller_clone.set_camera_enabled(&*cam_entity, enable).await {
-                Ok(()) => info!("Successfully {}d camera '{}'", if enable {"enable"} else {"disable"}, cam_entity.config.name),
-                Err(e) => error!("Failed to {} camera '{}': {}", if enable {"enable"} else {"disable"}, cam_entity.config.name, e),
+                match controller_clone.set_camera_enabled(&*cam_entity, enable_clone).await {
+                    Ok(()) => {
+                        info!("Successfully {}d camera '{}'", action_verb, cam_name);
+                        Ok(())
+                    }
+                    Err(e) => {
+                        error!("Failed to {} camera '{}': {}", action_verb, cam_name, e);
+                        Err(e)
+                    }
+                }
             }
-        });
-        control_tasks.push(task);
-    }
-
-    join_all(control_tasks).await;
-    info!("Camera control tasks completed.");
-
-    Ok(())
+        },
+    )
+    .await
 } 

@@ -31,9 +31,3 @@ pub fn initialize_logging(config: Option<&MasterConfig>, cli_matches: &clap::Arg
         eprintln!("Failed to initialize logger: {}. Logging might not work as expected.", e);
     });
 }
-
-// A simpler init function if you don't want to pass full config and CLI matches around initially.
-// This is what was in main.rs initially, using env var for quick setup.
-pub fn basic_env_logging_init() {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-} 
