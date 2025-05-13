@@ -20,12 +20,14 @@ declare -A IGNORE_DIRS=(
   # ----------------------------- ADD DIRECTORIES TO IGNORE HERE
   ["output"]=""
   ["target"]=""
+  ["design"]=""
 )
 
 declare -A DIRECTORIES=(
   # ----------------------------- ADD DIRECTORIES HERE
   ["config"]=""
   ["src"]=""
+  ["docs"]=""
 )
 
 declare -A FILES=(
@@ -85,7 +87,33 @@ for dir in "${!DIRECTORIES[@]}"; do
       echo "Ignoring directory: $dir"
       continue
     fi
-    eval find "$dir" -type f -not -name "*.env" ${DIRECTORIES[$dir]} | while IFS= read -r file; do
+    base_selection_args="-type f -not -name \"*.env\""
+    if [[ -n "${DIRECTORIES[$dir]}" ]]; then
+        base_selection_args+=" ${DIRECTORIES[$dir]}"
+    fi
+
+    prune_conditions_str=""
+    has_prune_conditions="false"
+    for ignored_basename in "${!IGNORE_DIRS[@]}"; do
+        path_to_prune_for_find="\"$dir/$ignored_basename\""
+
+        if [ "$has_prune_conditions" = "true" ]; then
+            prune_conditions_str+=" -o -path $path_to_prune_for_find"
+        else
+            prune_conditions_str="\\( -path $path_to_prune_for_find"
+            has_prune_conditions="true"
+        fi
+    done
+
+    find_command_to_eval="find \"$dir\""
+    if [ "$has_prune_conditions" = "true" ]; then
+        prune_conditions_str+=" \\) -prune -o"
+        find_command_to_eval+=" $prune_conditions_str"
+    fi
+    
+    find_command_to_eval+=" \\( $base_selection_args -print \\)"
+
+    eval "$find_command_to_eval" | while IFS= read -r file; do
       process_file "$file"
     done
   else
