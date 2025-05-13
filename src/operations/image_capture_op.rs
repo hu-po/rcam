@@ -6,6 +6,10 @@ use crate::operations::op_helper;
 use clap::ArgMatches;
 use log::{info, error, debug, warn};
 use std::time::Instant;
+use rerun::RecordingStreamBuilder;
+use rerun::datatypes::{TensorData, TensorDimension, TensorBuffer, ColorModel};
+use rerun::archetypes::Image as RerunImage;
+use image;
 
 pub async fn handle_capture_image_cli(
     master_config: &MasterConfig,
@@ -14,6 +18,21 @@ pub async fn handle_capture_image_cli(
 ) -> Result<()> {
     let op_start_time = Instant::now();
     let operation_display_name = "Image Capture";
+
+    let enable_rerun = args.get_one::<bool>("rerun").copied().unwrap_or(false);
+    let mut rec_stream_opt: Option<rerun::RecordingStream> = None;
+
+    if enable_rerun {
+        match RecordingStreamBuilder::new("rcam_image_capture").spawn() {
+            Ok(stream) => {
+                info!("Rerun recording stream initialized and viewer spawned.");
+                rec_stream_opt = Some(stream);
+            }
+            Err(e) => {
+                error!("Failed to initialize Rerun recording stream: {}. Continuing without Rerun.", e);
+            }
+        }
+    }
 
     if args.contains_id("delay") {
         warn!("⚠️ The --delay argument is ignored for image capture as it is now always synchronized.");
@@ -70,6 +89,12 @@ pub async fn handle_capture_image_cli(
         output_dir.display()
     );
 
+    let camera_name_to_index: std::collections::HashMap<String, usize> = cameras_info
+        .iter()
+        .enumerate()
+        .map(|(idx, (name, _))| (name.clone(), idx))
+        .collect();
+    
     match media_manager
         .capture_image(
             &cameras_info,
@@ -78,7 +103,7 @@ pub async fn handle_capture_image_cli(
         )
         .await
     {
-        Ok(paths) => {
+        Ok(mut paths) => {
             if paths.is_empty() && !cameras_info.is_empty() {
                 warn!(
                     "🖼️ Image capture completed but no files were produced. This might indicate an issue during capture for all cameras."
@@ -91,8 +116,70 @@ pub async fn handle_capture_image_cli(
                     paths.len(),
                     op_start_time.elapsed()
                 );
-                for path in paths {
+                for path in &paths {
                     info!("  -> {}", path.display());
+                }
+
+                if let Some(rec_stream) = &rec_stream_opt {
+                    if paths.is_empty() {
+                        info!("Rerun: No images were captured, nothing to log to Rerun.");
+                    } else {
+                        info!("Rerun: Logging {} captured image(s)...", paths.len());
+                    }
+
+                    for (idx, path) in paths.iter().enumerate() {
+                        let camera_name_opt = cameras_info.get(idx).map(|(name, _url)| name.as_str());
+                        
+                        let entity_path_str = if let Some(name) = camera_name_opt {
+                            format!("camera/{}/image", name)
+                        } else {
+                            format!("capture/image_{}", idx)
+                        };
+
+                        debug!("Rerun: Attempting to log image {} to entity path: {}", path.display(), entity_path_str);
+
+                        match image::load_from_memory(&std::fs::read(path)?) {
+                            Ok(dynamic_image) => {
+                                let img_rgb8 = dynamic_image.to_rgb8();
+                                info!("Image for {} loaded and converted to RGB8", entity_path_str);
+
+                                if let Some(rec_stream) = &rec_stream_opt {
+                                    let log_cam_name = camera_name_opt.unwrap_or("unknown_camera");
+                                    let entity_path_str = format!("camera/{}/image", log_cam_name);
+                                    
+                                    rec_stream.set_duration_secs("capture_time", op_start_time.elapsed().as_secs_f64());
+
+                                    let (width, height) = img_rgb8.dimensions();
+                                    
+                                    let shape = vec![
+                                        TensorDimension { size: height as u64, name: Some("height".to_string()) },
+                                        TensorDimension { size: width as u64, name: Some("width".to_string()) },
+                                        TensorDimension { size: 3, name: Some("color".to_string()) },
+                                    ];
+                                    
+                                    let tensor_data = TensorData {
+                                        shape,
+                                        buffer: TensorBuffer::U8(img_rgb8.into_raw().into()),
+                                        names: None,
+                                    };
+
+                                    match RerunImage::from_color_model_and_tensor(ColorModel::RGB, tensor_data.clone()) {
+                                        Ok(rerun_image_archetype) => {
+                                            if let Err(e) = rec_stream.log(&*entity_path_str, &rerun_image_archetype) {
+                                                error!("Failed to log image to Rerun for {}: {}", log_cam_name, e);
+                                            }
+                                        }
+                                        Err(e) => {
+                                            error!("Failed to create Rerun image for {} using from_color_model_and_tensor: {:?}", log_cam_name, e);
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                error!("Rerun: Failed to open or decode image at {}: {}. Skipping Rerun log for this image.", path.display(), e);
+                            }
+                        }
+                    }
                 }
             }
             info!("🖼️ All image capture operations completed in {:?}.", op_start_time.elapsed());

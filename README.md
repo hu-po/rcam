@@ -65,6 +65,10 @@ Captures a single image from specified or all cameras.
   ```bash
   rcam capture-image --delay 5
   ```
+- Capture and log to Rerun viewer:
+  ```bash
+  rcam capture-image --cameras front-door --rerun
+  ```
 
 ### `capture-video` 📹
 Records a video segment from specified or all cameras.
@@ -76,6 +80,10 @@ Records a video segment from specified or all cameras.
 - Record from specific cameras and set output directory:
   ```bash
   rcam capture-video --cameras front-door --duration 120 --output /path/to/save/videos
+  ```
+- Record a 30-second video from `cam1` and log frames to Rerun viewer:
+  ```bash
+  rcam capture-video --cameras cam1 --duration 30 --rerun
   ```
 
 ### `verify-times` ⏱️
@@ -101,6 +109,35 @@ Runs a diagnostic test suite.
 ```bash
 rcam test
 ```
+
+## Rerun Integration 📊
+
+This tool supports logging images and video frames to the [Rerun](https://www.rerun.io/) viewer for enhanced visualization and debugging.
+
+To enable Rerun logging, use the `--rerun` flag with the `capture-image` or `capture-video` subcommands. If the flag is provided, `rcam` will attempt to spawn a Rerun viewer and stream the captured data to it.
+
+**Installing the Rerun Viewer:**
+
+The Rerun SDK for Rust (which `rcam` uses) typically requires a separate installation of the Rerun viewer binary. You can install it using pip (if you have Python installed) or cargo:
+
+- Using pip:
+  ```bash
+  pip install rerun-sdk
+  ```
+  (This installs both the Python SDK and the `rerun` viewer binary)
+
+- Using cargo:
+  ```bash
+  cargo install rerun-cli --locked
+  ```
+  For potentially better video decoding performance, you might need `nasm` installed and use:
+  ```bash
+  cargo install rerun-cli --locked --features nasm
+  ```
+
+After installation, you should be able to run `rerun --help` in your terminal.
+
+Refer to the official [Rerun documentation](https://www.rerun.io/docs) for more details on using the Rerun viewer.
 
 You might need to run the executable directly from the target folder if it's not in your PATH:
 - `target/debug/rcam <subcommand> [options]` (for development)

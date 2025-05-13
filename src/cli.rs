@@ -30,6 +30,7 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("cameras").long("cameras").value_name("CAM_NAMES").help("Comma-separated list of camera names to capture from (default: all)").action(ArgAction::Set))
                 .arg(Arg::new("delay").long("delay").value_name("SECONDS").help("Delay in seconds before capturing image").value_parser(clap::value_parser!(u64)).action(ArgAction::Set))
                 .arg(Arg::new("output").short('o').long("output").value_name("DIR").help("Output directory for images").action(ArgAction::Set))
+                .arg(Arg::new("rerun").long("rerun").help("Enable Rerun logging for this capture").action(ArgAction::SetTrue))
         )
         .subcommand(
             Command::new("capture-video")
@@ -37,6 +38,7 @@ pub fn build_cli() -> Command {
                 .arg(Arg::new("cameras").long("cameras").value_name("CAM_NAMES").help("Comma-separated list of camera names to record from (default: all)").action(ArgAction::Set))
                 .arg(Arg::new("duration").long("duration").value_name("SECONDS").help("Duration of the video recording in seconds").value_parser(clap::value_parser!(u64)).action(ArgAction::Set))
                 .arg(Arg::new("output").short('o').long("output").value_name("DIR").help("Output directory for videos").action(ArgAction::Set))
+                .arg(Arg::new("rerun").long("rerun").help("Enable Rerun logging for this recording").action(ArgAction::SetTrue))
         )
         .subcommand(
             Command::new("verify-times")
