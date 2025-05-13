@@ -13,6 +13,8 @@ pub struct ApplicationConfig {
     pub log_level: Option<String>, // Making it optional to potentially use CLI or env var as primary
     pub cgi_time_path: String,
     pub rerun_flush_timeout_secs: Option<f32>,
+    pub rerun_memory_limit: Option<String>, // e.g., "50%", "2GB"
+    pub rerun_drop_at_latency: Option<String>, // e.g., "100ms", "1s"
 }
 
 impl Default for ApplicationConfig {
@@ -29,6 +31,8 @@ impl Default for ApplicationConfig {
             log_level: Some("info".to_string()),
             cgi_time_path: "/cgi-bin/global.cgi?action=getCurrentTime".to_string(),
             rerun_flush_timeout_secs: Some(10.0),
+            rerun_memory_limit: Some("90%".to_string()), // Default Rerun memory limit
+            rerun_drop_at_latency: Some("500ms".to_string()), // Default: no drop-at-latency
         }
     }
 } 

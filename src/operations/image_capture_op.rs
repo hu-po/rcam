@@ -25,11 +25,28 @@ pub async fn handle_capture_image_cli(
     if enable_rerun {
         let flush_timeout_secs = master_config.app_settings.rerun_flush_timeout_secs.unwrap_or(10.0);
 
+        let mut opts = rerun::SpawnOptions::default();
+
+        if let Some(limit) = &master_config.app_settings.rerun_memory_limit {
+            opts.memory_limit = limit.clone().into();
+            debug!("Rerun: Setting memory limit to: {}", limit);
+        } else {
+            debug!("Rerun: Using default memory limit.");
+        }
+
+        if let Some(latency_str) = &master_config.app_settings.rerun_drop_at_latency {
+            opts.extra_args.push("--drop-at-latency".into());
+            opts.extra_args.push(latency_str.clone().into());
+            debug!("Rerun: Setting drop-at-latency to: {}", latency_str);
+        } else {
+            debug!("Rerun: drop-at-latency not configured.");
+        }
+
         match RecordingStreamBuilder::new("rcam_image_capture")
-            .spawn_opts(&rerun::SpawnOptions::default(), Some(std::time::Duration::from_secs_f32(flush_timeout_secs)))
+            .spawn_opts(&opts, Some(std::time::Duration::from_secs_f32(flush_timeout_secs)))
         {
             Ok(stream) => {
-                info!("Rerun recording stream initialized and viewer spawned (FlushTimeout: {}s).", flush_timeout_secs);
+                info!("Rerun recording stream initialized for image capture (FlushTimeout: {}s).", flush_timeout_secs);
                 rec_stream_opt = Some(stream);
             }
             Err(e) => {
