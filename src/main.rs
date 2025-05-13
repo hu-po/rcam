@@ -19,8 +19,8 @@ async fn main() -> Result<()> {
     // Parse CLI arguments early for potential use in logging or config path
     let matches = cli::build_cli().get_matches();
 
-    // Load configuration
-    let config_path = matches.get_one::<String>("config").map(|s| s.as_str()).unwrap_or("config/default_config.yaml");
+    // Determine the configuration file path
+    let config_path = matches.get_one::<String>("config").map(|s| s.as_str()).unwrap_or("config/tatbot.yaml");
     
     debug!("Attempting to load configuration from: {}", config_path);
     let config_load_start_time = Instant::now();
