@@ -14,6 +14,7 @@ use tokio::sync::Mutex;
 use std::sync::Arc;
 use chrono::Utc;
 use futures::future::join_all;
+use chrono::DateTime;
 
 
 #[derive(Clone)]
@@ -117,123 +118,124 @@ impl CameraMediaManager {
         }
 
         if capture_arcs.is_empty() {
-            warn!("��️ No camera streams could be initialized for image capture. Aborting.");
+            warn!("🖼️ No camera streams could be initialized for image capture. Aborting.");
             return Ok(Vec::new());
         }
         info!("Successfully initialized {} out of {} camera streams for image capture.", capture_arcs.len(), cameras_info.len());
 
-        // 2. Prepare output directory (output_paths will be generated inside spawn_blocking)
+        // 2. Prepare output directory
         if !output_dir.exists() {
             debug!("Creating output directory for images: {}", output_dir.display());
             std::fs::create_dir_all(&output_dir)
                 .with_context(|| format!("Failed to create output directory for images: {}", output_dir.display()))?;
         }
         
-        let app_config_clone = app_config.clone();
+        // 3. Parallel Frame Reading and Saving
+        let mut read_tasks = Vec::new();
+        info!("🖼️ Spawning parallel frame read/save tasks for {} cameras.", capture_arcs.len());
 
-        // 3. Spawn blocking task for capture
-        let output_dir_clone = output_dir.clone(); // Clone for spawn_blocking
-        let task_future = tokio::task::spawn_blocking(move || -> Result<Vec<PathBuf>> {
-            let blocking_code_start_time = std::time::Instant::now();
-            info!("🖼️ OpenCV (blocking): Starting image capture task for {} cameras.", capture_arcs.len());
+        for (idx, cap_arc_clone) in capture_arcs.iter().cloned().enumerate() {
+            let cam_name = camera_names_ordered[idx].clone();
+            let app_config_task_clone = app_config.clone();
+            let output_dir_task_clone = output_dir.clone();
 
-            let mut locked_caps = Vec::new();
-            for (i, cap_arc) in capture_arcs.iter().enumerate() {
-                let cam_name = &camera_names_ordered[i];
-                debug!("  OpenCV (blocking): Locking capture for {}", cam_name);
-                match futures::executor::block_on(cap_arc.lock()) {
-                    guard => locked_caps.push(guard),
-                }
-            }
-            debug!("  OpenCV (blocking): All {} captures locked.", locked_caps.len());
-
-            let mut saved_image_paths: Vec<PathBuf> = Vec::new();
-            let mut frame = opencv_core::Mat::default(); // Define frame outside the loop
-
-            for (i, mut cap_guard) in locked_caps.into_iter().enumerate() {
-                let cam_name = &camera_names_ordered[i];
-                debug!("  OpenCV (blocking): Preparing to capture image for '{}'", cam_name);
+            let task = tokio::task::spawn_blocking(move || -> Result<(PathBuf, String, DateTime<Utc>)> {
+                let mut frame = opencv_core::Mat::default();
                 
-                let frame_read_start = std::time::Instant::now();
-                if !cap_guard.read(&mut frame).map_err(|e| anyhow!(e).context(format!("OpenCV: Failed to read frame from '{}' for capture", cam_name)))? {
-                    error!("❌ OpenCV (blocking): Failed to read frame for '{}'. Skipping this camera.", cam_name);
-                    continue;
+                // Lock inside task
+                // Note: futures::executor::block_on is used here because spawn_blocking runs in a
+                // separate thread pool that doesn't have a Tokio runtime context by default.
+                // Locking an async Mutex from a synchronous context requires a bridge like block_on.
+                let mut cap_guard = match futures::executor::block_on(cap_arc_clone.lock()) {
+                    guard => guard, // This part seems a bit off, direct assignment is fine if lock() returns the guard
+                };
+
+                let read_start_time = std::time::Instant::now();
+                if !cap_guard.read(&mut frame).map_err(|e| anyhow!(e).context(format!("OpenCV: Read failed for {}", cam_name)))? {
+                    return Err(anyhow!("OpenCV: Failed to read frame for '{}'", cam_name));
                 }
-                // let frame_read_timestamp = std::time::Instant::now(); // Or use chrono for wall clock. Using Instant for debug, filename uses chrono.
-                debug!("  OpenCV (blocking): Frame read for '{}' in {:?}", cam_name, frame_read_start.elapsed());
+                let capture_utc_ts = Utc::now(); // Timestamp immediately after read
+                debug!("OpenCV (blocking): Frame read for '{}' in {:?}, captured at {}", cam_name, read_start_time.elapsed(), capture_utc_ts);
+
 
                 if frame.empty() {
-                    error!("❌ OpenCV (blocking): Captured frame is empty for '{}'. Stream might be unstable or finished. Skipping.", cam_name);
-                    continue;
+                    return Err(anyhow!("OpenCV: Captured frame is empty for '{}'", cam_name));
                 }
-                info!("🖼️ OpenCV (blocking): Frame read successfully for '{}' (size: {}x{})", cam_name, frame.cols(), frame.rows());
 
-                // ---- Generate timestamp AFTER successful read ----
-                // Using crate::common::timestamp_utils::current_local_timestamp_str as per conceptual change.
-                // Ensure this utility function exists and is accessible.
-                // If not, replace with:
-                // let current_capture_timestamp_str = chrono::Local::now().format(&app_config_clone.filename_timestamp_format).to_string();
-                let current_capture_timestamp_str = crate::common::timestamp_utils::current_local_timestamp_str(
-                    &app_config_clone.filename_timestamp_format
-                );
-                let filename = format!("{}_{}.{}", cam_name, current_capture_timestamp_str, app_config_clone.image_format);
-                let output_path = output_dir_clone.join(&filename);
-                // ---- End timestamp generation ----
+                // Generate filename using the precise capture_utc_ts
+                let local_ts_for_filename = DateTime::<chrono::Local>::from(capture_utc_ts);
+                let filename_ts_str = local_ts_for_filename.format(&app_config_task_clone.filename_timestamp_format).to_string();
+                let filename = format!("{}_{}.{}", cam_name, filename_ts_str, app_config_task_clone.image_format);
+                let output_path = output_dir_task_clone.join(&filename);
 
-                debug!("  OpenCV (blocking): Saving frame for '{}' to {} (timestamp: {})", cam_name, output_path.display(), current_capture_timestamp_str);
-
+                // Ensure parent directory exists (it should due to earlier check, but good for safety)
                 if let Some(parent_dir) = output_path.parent() {
-                    if !parent_dir.exists() {
-                        std::fs::create_dir_all(parent_dir)
-                            .with_context(|| format!("OpenCV: Failed to create parent directory for image '{}'", output_path.display()))?;
+                    if !parent_dir.exists() { // Redundant if output_dir itself was created, but harmless
+                         std::fs::create_dir_all(parent_dir)
+                             .with_context(|| format!("OpenCV: Failed to create parent for image '{}'", output_path.display()))?;
                     }
                 }
-                
+
                 let mut params = opencv_core::Vector::<i32>::new();
-                if app_config_clone.image_format.to_lowercase() == "jpg" || app_config_clone.image_format.to_lowercase() == "jpeg" {
+                if app_config_task_clone.image_format.to_lowercase() == "jpg" || app_config_task_clone.image_format.to_lowercase() == "jpeg" {
                     params.push(imgcodecs::IMWRITE_JPEG_QUALITY);
-                    params.push(95);
+                    params.push(app_config_task_clone.jpeg_quality.unwrap_or(95) as i32); // Use configured or default
+                } else if app_config_task_clone.image_format.to_lowercase() == "png" {
+                    params.push(imgcodecs::IMWRITE_PNG_COMPRESSION);
+                    params.push(app_config_task_clone.png_compression.unwrap_or(3) as i32); // Use configured or default
                 }
+
 
                 let imwrite_start = std::time::Instant::now();
-                imgcodecs::imwrite(output_path.to_str().context("Invalid output path for image (not UTF-8)")?, &frame, &params)
-                    .map_err(|e| anyhow!(e).context(format!("OpenCV: Failed to save image for '{}' to '{}'", cam_name, output_path.display())))?;
-                debug!("  OpenCV (blocking): Image written for '{}' in {:?}", cam_name, imwrite_start.elapsed());
-                info!("✅ OpenCV (blocking): Image saved for '{}' to {}", cam_name, output_path.display());
-                saved_image_paths.push(output_path.clone());
-            }
+                imgcodecs::imwrite(output_path.to_str().context("Invalid path (not UTF-8) for imwrite")?, &frame, &params)
+                    .map_err(|e| anyhow!(e).context(format!("OpenCV: Imwrite failed for {} to {}", cam_name, output_path.display())))?;
+                debug!("OpenCV (blocking): Image written for '{}' in {:?}", cam_name, imwrite_start.elapsed());
+                
+                Ok((output_path, cam_name, capture_utc_ts))
+            });
+            read_tasks.push(task);
+        }
 
-            info!("🏁 OpenCV (blocking): Finished image capture task for {} cameras in {:?}. Saved {} images.", 
-                camera_names_ordered.len(), blocking_code_start_time.elapsed(), saved_image_paths.len());
-            Ok(saved_image_paths)
-        });
+        let mut saved_image_details: Vec<(PathBuf, String, DateTime<Utc>)> = Vec::new();
+        let frame_save_results = join_all(read_tasks).await;
 
-        match task_future.await {
-            Ok(Ok(paths)) => {
-                if paths.is_empty() && !cameras_info.is_empty() {
-                    warn!(
-                        "📸 Image capture completed but no files were produced. This might indicate an issue during capture for all cameras."
-                    );
-                } else if paths.is_empty() && cameras_info.is_empty() {
-                    info!("📸 Image capture: No cameras were processed (likely due to RTSP URL issues).");
-                } else {
-                    info!(
-                        "✅ Successfully captured {} image file(s) in {:?}",
-                        paths.len(),
-                        overall_start_time.elapsed()
-                    );
+        info!("🏁 All parallel image capture/save tasks completed processing.");
+        for (idx, result_outer) in frame_save_results.into_iter().enumerate() {
+            let cam_name_for_log = &camera_names_ordered.get(idx).map_or_else(|| "unknown_camera".to_string(), |cn| cn.clone());
+            match result_outer { // Handle JoinError from spawn_blocking
+                Ok(Ok((path, name, ts))) => {
+                    // Log success with consistent camera name from original order if available
+                    info!("✅ Image saved for '{}' to {} (captured at {} UTC)", name, path.display(), ts.to_rfc3339());
+                    saved_image_details.push((path, name, ts));
                 }
-                Ok(paths)
-            }
-            Ok(Err(e)) => {
-                error!("❌ Error during image capture blocking task: {:#}", e);
-                Err(e)
-            }
-            Err(e) => {
-                error!("❌ Image capture task panicked or was cancelled: {:#}", e);
-                Err(anyhow!(e).context("Image capture task failed"))
+                Ok(Err(e)) => { // Error from the task's Result
+                    error!("❌ Error capturing/saving frame for camera '{}': {:#}", cam_name_for_log, e);
+                }
+                Err(e) => { // Task panicked
+                    error!("❌ Image capture task for camera '{}' panicked: {:#}", cam_name_for_log, e);
+                }
             }
         }
+        
+        let saved_image_paths: Vec<PathBuf> = saved_image_details.iter().map(|(p, _, _)| p.clone()).collect();
+
+        if saved_image_paths.is_empty() && !cameras_info.is_empty() && !capture_arcs.is_empty() {
+             warn!(
+                "📸 Parallel image capture tasks completed, but no files were produced from {} successfully initialized streams. This might indicate issues during read/save for all processed cameras.",
+                capture_arcs.len()
+            );
+        } else if saved_image_paths.is_empty() && capture_arcs.is_empty() {
+            // This case should be covered by the earlier check on capture_arcs.is_empty(), but for robustness:
+            info!("📸 Image capture: No camera streams were available or initialized successfully.");
+        } else {
+            info!(
+                "✅ Successfully captured and saved {} image file(s) from {} camera streams in {:?}.",
+                saved_image_paths.len(),
+                capture_arcs.len(), // Log how many streams were attempted in parallel
+                overall_start_time.elapsed()
+            );
+        }
+        Ok(saved_image_paths)
     }
 
     pub async fn record_video(

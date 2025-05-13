@@ -1,6 +1,8 @@
 application:
   output_directory: "./output" # Default directory for saving images and videos
   image_format: "jpg" # e.g., "jpg", "png"
+  jpeg_quality: 95
+  png_compression: 3
   video_format: "mp4" # Container, e.g., "mp4", "mkv"
   video_codec: "h264" # e.g., "h264", "mjpeg", "copy" (to copy stream directly if supported)
   video_fps: 25.0 # Target recording FPS (float)

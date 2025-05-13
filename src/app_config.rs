@@ -4,6 +4,8 @@ use serde::Deserialize;
 pub struct ApplicationConfig {
     pub output_directory: String,
     pub image_format: String, // e.g., "jpg", "png"
+    pub jpeg_quality: Option<u8>, // JPEG quality (0-100)
+    pub png_compression: Option<u8>, // PNG compression level (0-9 for zopfli/libdeflate, or specific to encoder)
     pub video_format: String, // Container, e.g., "mp4", "mkv"
     pub video_codec: String,  // e.g., "h264", "mjpeg", "copy"
     pub video_fps: f32,
@@ -22,6 +24,8 @@ impl Default for ApplicationConfig {
         ApplicationConfig {
             output_directory: "./output".to_string(),
             image_format: "jpg".to_string(),
+            jpeg_quality: Some(95), // Default JPEG quality
+            png_compression: Some(3), // Default PNG compression
             video_format: "mp4".to_string(),
             video_codec: "copy".to_string(),
             video_fps: 25.0,
