@@ -141,11 +141,12 @@ pub async fn handle_diagnostic_cli(
             
             let task_cam_entity_arc_ctrl = cam_arc.clone();
             let controller_clone_diag = camera_controller_diag.clone(); // Assuming CameraController is Clone
+            let app_settings_clone_diag = master_config.app_settings.clone(); // Clone app_settings for diagnostics
 
             // Directly call camera control logic
             let control_future = async move {
                 let cam_entity = task_cam_entity_arc_ctrl.lock().await;
-                controller_clone_diag.set_camera_enabled(&*cam_entity, action_bool).await
+                controller_clone_diag.set_camera_enabled(&*cam_entity, &app_settings_clone_diag, action_bool).await
             };
 
             match control_future.await {

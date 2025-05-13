@@ -11,6 +11,9 @@ pub struct ApplicationConfig {
     pub filename_timestamp_format: String, // strftime format string
     pub time_sync_tolerance_seconds: f32,
     pub log_level: Option<String>, // Making it optional to potentially use CLI or env var as primary
+    pub cgi_time_path: String,
+    pub cgi_control_enable_path: String,
+    pub cgi_control_disable_path: String,
 }
 
 impl Default for ApplicationConfig {
@@ -25,6 +28,9 @@ impl Default for ApplicationConfig {
             filename_timestamp_format: "%Yy%mm%dd%Hh%Mm%Ss".to_string(),
             time_sync_tolerance_seconds: 5.0,
             log_level: Some("info".to_string()),
+            cgi_time_path: "/cgi-bin/global.cgi?action=getCurrentTime".to_string(),
+            cgi_control_enable_path: "/cgi-bin/configManager.cgi?action=setConfig&VideoInOptions[0].Enable=1".to_string(),
+            cgi_control_disable_path: "/cgi-bin/configManager.cgi?action=setConfig&VideoInOptions[0].Enable=0".to_string(),
         }
     }
 } 

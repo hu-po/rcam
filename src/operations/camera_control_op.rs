@@ -34,7 +34,7 @@ pub async fn handle_control_camera_cli(
         "Camera Control",
         "output",
         None,
-        move |cam_entity_arc, _app_settings_arc, _operation_output_dir| {
+        move |cam_entity_arc, app_settings_arc, _operation_output_dir| {
             let controller_clone = camera_controller.clone();
             let enable_clone = enable;
 
@@ -45,7 +45,7 @@ pub async fn handle_control_camera_cli(
                 
                 info!("Attempting to {} camera: '{}'", action_verb, cam_name);
 
-                match controller_clone.set_camera_enabled(&*cam_entity, enable_clone).await {
+                match controller_clone.set_camera_enabled(&*cam_entity, &app_settings_arc, enable_clone).await {
                     Ok(()) => {
                         info!("Successfully {}d camera '{}'", action_verb, cam_name);
                         Ok(())

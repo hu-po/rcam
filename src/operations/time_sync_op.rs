@@ -28,13 +28,13 @@ pub async fn handle_verify_times_cli(
 
     for cam_entity_arc in cameras_to_target {
         // Clone what's needed for the async block
-        let controller_clone = camera_controller.clone(); // Assuming CameraController is Clone or Arc-able
-        // let cam_name_clone = cam_entity_arc.lock().await.config.name.clone(); // Done inside task for less locking
+        let controller_clone = camera_controller.clone();
+        let app_settings_clone = master_config.app_settings.clone();
 
         let task = tokio::spawn(async move {
             let cam_entity = cam_entity_arc.lock().await;
             info!("Querying time for camera: '{}'", cam_entity.config.name);
-            match controller_clone.get_camera_time(&*cam_entity).await {
+            match controller_clone.get_camera_time(&*cam_entity, &app_settings_clone).await {
                 Ok(camera_time) => {
                     info!("Camera '{}' time (UTC): {}", cam_entity.config.name, camera_time.to_rfc3339());
                     Some((cam_entity.config.name.clone(), camera_time))
