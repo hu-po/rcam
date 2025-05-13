@@ -2,7 +2,7 @@ use crate::config_loader::MasterConfig;
 use crate::app_config::ApplicationConfig;
 use crate::core::camera_manager::{CameraManager, parse_camera_names_arg};
 use crate::camera::camera_entity::CameraEntity;
-use crate::errors::AppError;
+use anyhow::{Context, Result};
 use clap::ArgMatches;
 use futures::future::join_all;
 use log::{info, error, warn};
@@ -46,10 +46,10 @@ pub async fn run_generic_camera_op<F, Fut>(
     output_cli_arg_key: &str,
     default_output_subdir: Option<&str>,
     per_camera_op: F,
-) -> Result<(), AppError>
+) -> Result<()>
 where
     F: Fn(Arc<Mutex<CameraEntity>>, Arc<ApplicationConfig>, PathBuf) -> Fut + Send + Sync + 'static + Clone,
-    Fut: std::future::Future<Output = Result<(), AppError>> + Send + 'static,
+    Fut: std::future::Future<Output = Result<()>> + Send + 'static,
 {
     info!("Starting {} operation...", operation_display_name);
 
@@ -89,19 +89,17 @@ where
 
     if !operation_base_output_dir.exists() {
         info!("Output directory {} does not exist. Creating it.", operation_base_output_dir.display());
-        std::fs::create_dir_all(&operation_base_output_dir).map_err(|e| {
-            AppError::Io(format!(
-                "Failed to create output directory \'{}\': {}",
-                operation_base_output_dir.display(),
-                e
-            ))
-        })?;
+        std::fs::create_dir_all(&operation_base_output_dir)
+            .with_context(|| format!(
+                    "Failed to create output directory '{}'",
+                    operation_base_output_dir.display()
+            ))?;
     } else {
         info!("Using existing output directory: {}", operation_base_output_dir.display());
     }
 
     // 3. Spawn tasks
-    let mut tasks: Vec<JoinHandle<Result<(), AppError>>> = Vec::new();
+    let mut tasks: Vec<JoinHandle<Result<()>>> = Vec::new();
     let app_settings_arc = Arc::new(master_config.app_settings.clone());
 
     for cam_entity_arc in cameras_to_target.iter() { // Iterate over owned Vec
@@ -123,13 +121,11 @@ where
         match task_result {
             Ok(Ok(())) => { /* Per-camera operation successful */ }
             Ok(Err(op_err)) => {
-                // Error from within per_camera_op
-                error!("Error during {} for camera task {}: {}", operation_display_name, i + 1, op_err);
+                error!("Error during {} for camera task {}: {:#}", operation_display_name, i + 1, op_err);
                 operation_errors += 1;
             }
             Err(join_err) => {
-                // Tokio task join error (e.g., panic in task)
-                error!("Task execution failed for {} for camera task {}: {}", operation_display_name, i + 1, join_err);
+                error!("Task execution failed (panic or cancellation) for {} for camera task {}: {:#}", operation_display_name, i + 1, join_err);
                 operation_errors += 1;
             }
         }

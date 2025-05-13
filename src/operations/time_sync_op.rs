@@ -1,16 +1,18 @@
 use crate::config_loader::MasterConfig;
 use crate::core::camera_manager::CameraManager;
 use crate::camera::camera_controller::CameraController;
-use crate::errors::AppError;
+// use crate::errors::AppError; // AppError might be replaced by anyhow
+use anyhow::Result; // Import anyhow::Result
 use chrono::{Utc, DateTime};
 use log::{info, warn, error};
 use futures::future::join_all;
+use tokio::task::JoinHandle; // For explicit JoinHandle type
 
 pub async fn handle_verify_times_cli(
     master_config: &MasterConfig,
     camera_manager: &CameraManager,
     // _args: &clap::ArgMatches, // Not used for now, but could be for specific options
-) -> Result<(), AppError> {
+) -> Result<()> { // Changed return type to anyhow::Result
     info!("Handling verify-times command...");
 
     let camera_controller = CameraController::new(); 
@@ -24,24 +26,27 @@ pub async fn handle_verify_times_cli(
     let system_time_now = Utc::now();
     info!("Current system time (UTC): {}", system_time_now.to_rfc3339());
 
-    let mut time_check_tasks = Vec::new();
+    let mut time_check_tasks: Vec<JoinHandle<Result<(String, DateTime<Utc>)>>> = Vec::new();
 
     for cam_entity_arc in cameras_to_target {
-        // Clone what's needed for the async block
         let controller_clone = camera_controller.clone();
         let app_settings_clone = master_config.app_settings.clone();
-
+        
         let task = tokio::spawn(async move {
             let cam_entity = cam_entity_arc.lock().await;
-            info!("Querying time for camera: '{}'", cam_entity.config.name);
+            let cam_name_clone = cam_entity.config.name.clone();
+            info!("Querying time for camera: '{}'", cam_name_clone);
+            
+            // Assuming get_camera_time will be updated to return anyhow::Result<DateTime<Utc>>
+            // The error will be an anyhow::Error, which includes context.
             match controller_clone.get_camera_time(&*cam_entity, &app_settings_clone).await {
                 Ok(camera_time) => {
-                    info!("Camera '{}' time (UTC): {}", cam_entity.config.name, camera_time.to_rfc3339());
-                    Some((cam_entity.config.name.clone(), camera_time))
+                    info!("Camera '{}' time (UTC): {}", cam_name_clone, camera_time.to_rfc3339());
+                    Ok((cam_name_clone, camera_time))
                 }
                 Err(e) => {
-                    error!("Failed to get time for camera '{}': {}", cam_entity.config.name, e);
-                    None
+                    error!("Failed to get time for camera '{}': {:#}", cam_name_clone, e);
+                    Err(e) // Propagate anyhow::Error from the task
                 }
             }
         });
@@ -50,20 +55,32 @@ pub async fn handle_verify_times_cli(
 
     let results = join_all(time_check_tasks).await;
     let mut successful_times: Vec<(String, DateTime<Utc>)> = Vec::new();
-    for result in results {
+    let mut task_errors = 0;
+
+    for result in results { // result is Result<Result<(String, DateTime<Utc>), anyhow::Error>, JoinError>
         match result {
-            Ok(Some(time_data)) => successful_times.push(time_data),
-            Ok(None) => { /* Error already logged */ }
-            Err(e) => error!("Task panicked while getting camera time: {}", e), // Should not happen with proper error handling within task
+            Ok(Ok(time_data)) => successful_times.push(time_data),
+            Ok(Err(_op_err)) => { // op_err is anyhow::Error, already logged by the task
+                task_errors += 1;
+            }
+            Err(join_err) => { // This is a JoinError (panic)
+                error!("Task panicked while getting camera time: {:#}", join_err);
+                task_errors += 1;
+            }
         }
     }
 
     if successful_times.is_empty() {
-        error!("Could not retrieve time from any camera.");
+        if task_errors > 0 {
+            warn!("Could not retrieve time from any camera due to errors.");
+        } else {
+            warn!("No camera times were successfully retrieved (no cameras or other issue).");
+        }
+        // Still returns Ok(()) as per original logic, but logs indicate issues.
+        // If an error should be propagated: return Err(anyhow::anyhow!("Failed to retrieve time from any camera"));
         return Ok(());
     }
 
-    // Perform synchronization check
     let tolerance_seconds = master_config.app_settings.time_sync_tolerance_seconds as i64;
     info!("Time synchronization tolerance: {} seconds", tolerance_seconds);
 
@@ -91,7 +108,6 @@ pub async fn handle_verify_times_cli(
     }
 
     if successful_times.len() > 1 {
-        // Check cameras against each other if more than one responded
         for i in 0..successful_times.len() {
             for j in (i + 1)..successful_times.len() {
                 let (name1, time1) = &successful_times[i];

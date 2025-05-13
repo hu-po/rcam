@@ -1,5 +1,5 @@
 use crate::camera_config::CameraConfig;
-use crate::errors::AppError;
+use anyhow::{Result, bail};
 use std::env;
 use log::{info, warn};
 
@@ -49,7 +49,7 @@ impl CameraEntity {
         self.state = new_state;
     }
 
-    pub fn get_rtsp_url(&self) -> Result<String, AppError> {
+    pub fn get_rtsp_url(&self) -> Result<String> {
         if let Some(pass) = self.get_password() {
             let base_url = format!(
                 "rtsp://{}:{}@{}",
@@ -62,18 +62,22 @@ impl CameraEntity {
                 let path = if override_path.starts_with('/') {
                     override_path.clone()
                 } else {
-                    format!("/ {}", override_path) // Ensure leading slash
+                    format!("/{}", override_path.trim_start_matches('/').trim())
                 };
                 Ok(format!("{}{}", base_url, path))
             } else {
-                warn!("RTSP path override not set for camera '{}', using a generic default path. This might fail.", self.config.name);
+                warn!(
+                    "RTSP path override not set for camera '{}', using a generic default path. This might fail.", 
+                    self.config.name
+                );
                 Ok(format!("{}/cam/realmonitor?channel=1&subtype=0", base_url)) 
             }
         } else {
-            Err(AppError::Authentication {
-                camera_name: self.config.name.clone(),
-                details: "Password not available for RTSP URL construction".to_string(),
-            })
+            bail!(
+                "Password not available for RTSP URL construction for camera '{}'. Ensure '{}_PASSWORD' env var is set.", 
+                self.config.name, 
+                self.config.name.to_uppercase().replace("-", "_")
+            );
         }
     }
 } 

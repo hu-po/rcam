@@ -16,6 +16,7 @@ reqwest = { version = "0.11", features = ["json", "stream"] }
 opencv = "0.94.4"
 image = "0.24"
 futures = "0.3"
+anyhow = "1.0"
 
 [dev-dependencies]
 wiremock = "0.5" # For mocking HTTP services in tests 

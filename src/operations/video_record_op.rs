@@ -1,7 +1,7 @@
 use crate::config_loader::MasterConfig;
 use crate::core::camera_manager::CameraManager;
 use crate::camera::camera_media::CameraMediaManager;
-use crate::errors::AppError;
+use anyhow::Result;
 use crate::common::file_utils;
 use crate::operations::op_helper::run_generic_camera_op;
 use clap::ArgMatches;
@@ -12,7 +12,7 @@ pub async fn handle_record_video_cli(
     master_config: &MasterConfig,
     camera_manager: &CameraManager,
     args: &ArgMatches,
-) -> Result<(), AppError> {
+) -> Result<()> {
     let duration_seconds = args
         .get_one::<u64>("duration")
         .copied()
@@ -68,7 +68,7 @@ pub async fn handle_record_video_cli(
                     }
                     Err(e) => {
                         error!(
-                            "Failed to record video for '{}': {}",
+                            "Failed to record video for '{}': {:#}",
                             cam_entity.config.name, e
                         );
                         Err(e)

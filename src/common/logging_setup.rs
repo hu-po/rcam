@@ -1,9 +1,10 @@
 use env_logger::Builder;
 use log::LevelFilter;
 use crate::config_loader::MasterConfig;
+use anyhow::{Context, Result};
 // We might not need cli::build_cli() here if we pass matches directly
 
-pub fn initialize_logging(config: Option<&MasterConfig>, cli_matches: &clap::ArgMatches) {
+pub fn initialize_logging(config: Option<&MasterConfig>, cli_matches: &clap::ArgMatches) -> Result<()> {
     let mut builder = Builder::new();
 
     // Determine log level from CLI, then config, then default
@@ -27,7 +28,6 @@ pub fn initialize_logging(config: Option<&MasterConfig>, cli_matches: &clap::Arg
         }
     };
 
-    builder.try_init().unwrap_or_else(|e| {
-        eprintln!("Failed to initialize logger: {}. Logging might not work as expected.", e);
-    });
+    builder.try_init().context("Failed to initialize logger")?;
+    Ok(())
 }

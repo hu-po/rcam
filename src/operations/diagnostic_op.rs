@@ -1,6 +1,6 @@
 use crate::config_loader::MasterConfig;
 use crate::core::camera_manager::CameraManager;
-use crate::errors::AppError;
+use anyhow::{Result, Context};
 use clap::ArgMatches;
 use log::{info, warn, error};
 use std::path::PathBuf;
@@ -8,7 +8,7 @@ use std::path::PathBuf;
 // Import operation handlers
 use crate::camera::camera_media::CameraMediaManager; 
 use crate::common::file_utils;
-use super::time_sync_op; // Still used
+use super::time_sync_op;
 use crate::camera::camera_controller::CameraController;
 
 struct DiagnosticResult {
@@ -21,7 +21,7 @@ pub async fn handle_diagnostic_cli(
     master_config: &MasterConfig,
     camera_manager: &CameraManager,
     _args: &ArgMatches, // CLI args for diagnostics, if any are added later
-) -> Result<(), AppError> {
+) -> Result<()> {
     info!("Starting diagnostic test suite...");
     let mut results: Vec<DiagnosticResult> = Vec::new();
 
@@ -36,15 +36,15 @@ pub async fn handle_diagnostic_cli(
         Err(e) => results.push(DiagnosticResult {
             test_name: "Time Synchronization (All Cameras)".to_string(),
             success: false,
-            details: format!("Failed: {}", e),
+            details: format!("Failed: {:#}", e),
         }),
     }
 
     let diagnostic_output_dir = PathBuf::from(&master_config.app_settings.output_directory).join("diagnostics");
     if !diagnostic_output_dir.exists() {
-        if let Err(e) = std::fs::create_dir_all(&diagnostic_output_dir) {
-            error!("Failed to create diagnostic output directory: {}. Some tests might fail to save files.", e);
-            // Decide if we should stop or continue. For now, continue and let individual tests handle it.
+        if let Err(e) = std::fs::create_dir_all(&diagnostic_output_dir)
+            .with_context(|| format!("Failed to create diagnostic output directory: {}", diagnostic_output_dir.display())) {
+            error!("{:#}", e); 
         }
     }
     info!("Diagnostic outputs will be saved to: {}", diagnostic_output_dir.display());
@@ -60,17 +60,17 @@ pub async fn handle_diagnostic_cli(
 
         // 2. Test single image capture per camera
         let image_diag_output_dir = diagnostic_output_dir.join(&cam_name).join("image");
-        std::fs::create_dir_all(&image_diag_output_dir).ok(); // Best effort
-        
-        // Directly call image capture logic
+        if let Err(e) = std::fs::create_dir_all(&image_diag_output_dir)
+            .with_context(|| format!("Failed to create image diagnostic dir for {}: {}", cam_name, image_diag_output_dir.display())) {
+            error!("Could not create image diagnostic directory for {}: {:#}. Image test may fail to save.", cam_name, e);
+        }        
         info!("DIAGNOSTIC [{}]: Running image capture test...", cam_name);
         let media_manager_img = CameraMediaManager::new();
         let app_config_img_clone = master_config.app_settings.clone();
         
-        let task_cam_entity_arc = cam_arc.clone(); // Clone Arc for the async block
+        let task_cam_entity_arc = cam_arc.clone();
         let task_image_diag_output_dir = image_diag_output_dir.clone();
 
-        // This part is now simplified to directly call the capture logic
         let image_capture_future = async move {
             let mut cam_entity = task_cam_entity_arc.lock().await;
             let filename = file_utils::generate_timestamped_filename(
@@ -79,7 +79,6 @@ pub async fn handle_diagnostic_cli(
                 &app_config_img_clone.image_format
             );
             let output_path = task_image_diag_output_dir.join(filename);
-            // Using None for delay_option as it's a basic diagnostic
             media_manager_img.capture_image(&mut *cam_entity, &app_config_img_clone, output_path.clone(), None).await
         };
         
@@ -92,13 +91,16 @@ pub async fn handle_diagnostic_cli(
             Err(e) => results.push(DiagnosticResult {
                 test_name: format!("Image Capture ('{}')", cam_name),
                 success: false,
-                details: format!("Failed: {}", e),
+                details: format!("Failed: {:#}", e),
             }),
         }
 
         // 3. Test short video capture per camera
         let video_diag_output_dir = diagnostic_output_dir.join(&cam_name).join("video");
-        std::fs::create_dir_all(&video_diag_output_dir).ok(); // Best effort
+        if let Err(e) = std::fs::create_dir_all(&video_diag_output_dir)
+            .with_context(|| format!("Failed to create video diagnostic dir for {}: {}", cam_name, video_diag_output_dir.display())) {
+            error!("Could not create video diagnostic directory for {}: {:#}. Video test may fail to save.", cam_name, e);
+        }
         let video_duration_secs: u64 = 5; // 5 second video for diagnostics
         
         info!("DIAGNOSTIC [{}]: Running short video capture test ({}s)...", cam_name, video_duration_secs);
@@ -107,7 +109,6 @@ pub async fn handle_diagnostic_cli(
         let task_cam_entity_arc_vid = cam_arc.clone();
         let task_video_diag_output_dir = video_diag_output_dir.clone();
 
-        // Directly call video recording logic
         let video_record_future = async move {
             let mut cam_entity = task_cam_entity_arc_vid.lock().await;
             let filename = file_utils::generate_timestamped_filename(
@@ -129,7 +130,7 @@ pub async fn handle_diagnostic_cli(
             Err(e) => results.push(DiagnosticResult {
                 test_name: format!("Video Record ('{}', {}s)", cam_name, video_duration_secs),
                 success: false,
-                details: format!("Failed: {}", e),
+                details: format!("Failed: {:#}", e),
             }),
         }
 
@@ -140,10 +141,9 @@ pub async fn handle_diagnostic_cli(
             info!("DIAGNOSTIC [{}]: Running control action: {}...", cam_name, action_str);
             
             let task_cam_entity_arc_ctrl = cam_arc.clone();
-            let controller_clone_diag = camera_controller_diag.clone(); // Assuming CameraController is Clone
-            let app_settings_clone_diag = master_config.app_settings.clone(); // Clone app_settings for diagnostics
+            let controller_clone_diag = camera_controller_diag.clone();
+            let app_settings_clone_diag = master_config.app_settings.clone();
 
-            // Directly call camera control logic
             let control_future = async move {
                 let cam_entity = task_cam_entity_arc_ctrl.lock().await;
                 controller_clone_diag.set_camera_enabled(&*cam_entity, &app_settings_clone_diag, action_bool).await
@@ -158,7 +158,7 @@ pub async fn handle_diagnostic_cli(
                 Err(e) => results.push(DiagnosticResult {
                     test_name: format!("Control Action ('{}': {})", cam_name, action_str),
                     success: false,
-                    details: format!("Failed: {}", e),
+                    details: format!("Failed: {:#}", e),
                 }),
             }
         }

@@ -1,7 +1,7 @@
 use crate::config_loader::MasterConfig;
 use crate::core::camera_manager::CameraManager;
 use crate::camera::camera_media::CameraMediaManager;
-use crate::errors::AppError;
+use anyhow::Result;
 use crate::common::file_utils;
 use crate::operations::op_helper::run_generic_camera_op;
 use clap::ArgMatches;
@@ -12,7 +12,7 @@ pub async fn handle_capture_image_cli(
     master_config: &MasterConfig,
     camera_manager: &CameraManager,
     args: &ArgMatches,
-) -> Result<(), AppError> {
+) -> Result<()> {
     let delay_option = args.get_one::<u64>("delay").map(|&s| Duration::from_secs(s));
     
     let media_manager = CameraMediaManager::new();
@@ -51,8 +51,8 @@ pub async fn handle_capture_image_cli(
                         Ok(())
                     }
                     Err(e) => {
-                        error!("Failed to capture image for '{}': {}", cam_entity.config.name, e);
-                        Err(e) 
+                        error!("Failed to capture image for '{}': {:#}", cam_entity.config.name, e);
+                        Err(e)
                     }
                 }
             }

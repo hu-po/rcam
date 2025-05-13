@@ -1,6 +1,6 @@
 use crate::camera::camera_entity::CameraEntity;
 use crate::config_loader::MasterConfig;
-use crate::errors::AppError;
+use anyhow::{Result, bail};
 use log::{info};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -12,14 +12,11 @@ pub struct CameraManager {
 }
 
 impl CameraManager {
-    pub fn new(master_config: &MasterConfig) -> Result<Self, AppError> {
+    pub fn new(master_config: &MasterConfig) -> Result<Self> {
         let mut cameras = HashMap::new();
         for cam_config in &master_config.cameras {
             if cameras.contains_key(&cam_config.name) {
-                return Err(AppError::Config(format!(
-                    "Duplicate camera name found: {}",
-                    cam_config.name
-                )));
+                bail!("Duplicate camera name found in configuration: {}", cam_config.name);
             }
             let camera_entity = CameraEntity::new(cam_config.clone());
             cameras.insert(cam_config.name.clone(), Arc::new(Mutex::new(camera_entity)));
