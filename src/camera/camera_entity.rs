@@ -4,7 +4,6 @@ use std::env;
 use log::{info, warn, debug};
 use std::time::Instant;
 use std::sync::{Arc, Mutex};
-use opencv::core::Mat;
 
 #[derive(Debug, Clone)]
 pub enum CameraState {
@@ -13,17 +12,10 @@ pub enum CameraState {
     Connected,
 }
 
-#[derive(Debug, Default, Clone)]
-pub struct CameraStats {
-    // Define fields for stats if any, e.g., frames_processed: u64,
-}
-
 #[derive(Debug, Clone)]
 pub struct CameraEntity {
     pub config: CameraConfig,
     pub state: Arc<Mutex<CameraState>>,
-    pub last_image: Arc<Mutex<Option<Mat>>>,
-    stats: Arc<Mutex<CameraStats>>,
     password: Option<String>,
 }
 
@@ -34,8 +26,6 @@ impl CameraEntity {
         let mut entity = Self {
             config: config.clone(),
             state: Arc::new(Mutex::new(CameraState::Idle)),
-            last_image: Arc::new(Mutex::new(None)),
-            stats: Arc::new(Mutex::new(CameraStats::default())),
             password: None,
         };
         entity.load_password();
@@ -107,20 +97,5 @@ impl CameraEntity {
                 self.config.name.to_uppercase().replace("-", "_")
             );
         }
-    }
-
-    pub async fn update_config(&self, new_config: CameraConfig) {
-        // ... existing code ...
-        let start_time = Instant::now();
-        debug!("Creating CameraEntity for '{}'", new_config.name);
-        let entity = Self {
-            config: new_config.clone(),
-            state: Arc::new(Mutex::new(CameraState::Idle)),
-            last_image: Arc::new(Mutex::new(None)),
-            stats: Arc::new(Mutex::new(CameraStats::default())),
-            password: None,
-        };
-        // Now log using the cloned config.name from the entity
-        debug!("✅ CameraEntity for '{}' created in {:?}", entity.config.name, start_time.elapsed());
     }
 } 
