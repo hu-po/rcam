@@ -8,7 +8,6 @@ use std::time::Instant;
 
 // Import operation handlers
 use crate::camera::camera_media::CameraMediaManager; 
-use crate::common::file_utils;
 use super::time_sync_op;
 use crate::camera::camera_controller::CameraController;
 
@@ -96,24 +95,33 @@ pub async fn handle_diagnostic_cli(
         let task_image_diag_output_dir = image_diag_output_dir.clone();
 
         let image_capture_future = async move {
-            let mut cam_entity = task_cam_entity_arc.lock().await;
-            let filename = file_utils::generate_timestamped_filename(
-                &cam_entity.config.name,
-                &app_config_img_clone.filename_timestamp_format,
-                &app_config_img_clone.image_format
-            );
-            let output_path = task_image_diag_output_dir.join(filename);
-            media_manager_img.capture_image(&mut *cam_entity, &app_config_img_clone, output_path.clone(), None).await
+            let cam_entity_locked = task_cam_entity_arc.lock().await;
+            let current_cam_name = cam_entity_locked.config.name.clone();
+            let rtsp_url = cam_entity_locked.get_rtsp_url()
+                .with_context(|| format!("DIAGNOSTIC [{}]: Failed to get RTSP URL for image test", current_cam_name))?;
+            drop(cam_entity_locked);
+
+            let cameras_info_for_img_capture = vec![(current_cam_name, rtsp_url)];
+            media_manager_img.capture_image(&cameras_info_for_img_capture, &app_config_img_clone, task_image_diag_output_dir).await
         };
         
         match image_capture_future.await {
-            Ok(path) => {
-                info!("    DIAGNOSTIC [{}]: Image Capture test PASSED in {:?}. Image: {}", cam_name, img_test_start.elapsed(), path.display());
-                results.push(DiagnosticResult {
-                    test_name: format!("Image Capture ('{}')", cam_name),
-                    success: true,
-                    details: format!("Completed. Image saved in {}", path.display()),
-                });
+            Ok(paths) => {
+                if let Some(path) = paths.first() {
+                    info!("    DIAGNOSTIC [{}]: Image Capture test PASSED in {:?}. Image: {}", cam_name, img_test_start.elapsed(), path.display());
+                    results.push(DiagnosticResult {
+                        test_name: format!("Image Capture ('{}')", cam_name),
+                        success: true,
+                        details: format!("Completed. Image saved in {}", path.display()),
+                    });
+                } else {
+                    error!("    DIAGNOSTIC [{}]: Image Capture test did not produce a file, though the operation succeeded, in {:?}.", cam_name, img_test_start.elapsed());
+                    results.push(DiagnosticResult {
+                        test_name: format!("Image Capture ('{}')", cam_name),
+                        success: false,
+                        details: "Operation succeeded but no image file was created.".to_string(),
+                    });
+                }
             },
             Err(e) => {
                 error!("    DIAGNOSTIC [{}]: Image Capture test FAILED in {:?}: {:#}", cam_name, img_test_start.elapsed(), e);
@@ -140,29 +148,43 @@ pub async fn handle_diagnostic_cli(
         let vid_test_start = Instant::now();
         let media_manager_vid = CameraMediaManager::new();
         let app_config_vid_clone = master_config.app_settings.clone();
-        let task_cam_entity_arc_vid = cam_arc.clone();
         let task_video_diag_output_dir = video_diag_output_dir.clone();
 
         let video_record_future = async move {
-            let mut cam_entity = task_cam_entity_arc_vid.lock().await;
-            let filename = file_utils::generate_timestamped_filename(
-                &cam_entity.config.name,
-                &app_config_vid_clone.filename_timestamp_format,
-                &app_config_vid_clone.video_format
-            );
-            let output_path = task_video_diag_output_dir.join(filename);
+            let cam_entity_locked = cam_arc.lock().await;
+            let current_cam_name = cam_entity_locked.config.name.clone();
+            let rtsp_url = cam_entity_locked.get_rtsp_url()
+                .with_context(|| format!("DIAGNOSTIC [{}]: Failed to get RTSP URL for video test", current_cam_name))?;
+            drop(cam_entity_locked);
+
+            let cameras_info_for_sync = vec![(current_cam_name, rtsp_url)];
             let recording_duration = std::time::Duration::from_secs(video_duration_secs);
-            media_manager_vid.record_video(&mut *cam_entity, &app_config_vid_clone, output_path.clone(), recording_duration).await
+
+            media_manager_vid.record_video(
+                &cameras_info_for_sync,
+                &app_config_vid_clone, 
+                task_video_diag_output_dir, 
+                recording_duration
+            ).await
         };
 
         match video_record_future.await {
-            Ok(path) => {
-                info!("    DIAGNOSTIC [{}]: Video Record test ({}s) PASSED in {:?}. Video: {}", cam_name, video_duration_secs, vid_test_start.elapsed(), path.display());
-                results.push(DiagnosticResult {
-                    test_name: format!("Video Record ('{}', {}s)", cam_name, video_duration_secs),
-                    success: true,
-                    details: format!("Completed. Video saved in {}", path.display()),
-                });
+            Ok(paths) => {
+                if let Some(path) = paths.first() {
+                    info!("    DIAGNOSTIC [{}]: Video Record test ({}s) PASSED in {:?}. Video: {}", cam_name, video_duration_secs, vid_test_start.elapsed(), path.display());
+                    results.push(DiagnosticResult {
+                        test_name: format!("Video Record ('{}', {}s)", cam_name, video_duration_secs),
+                        success: true,
+                        details: format!("Completed. Video saved in {}", path.display()),
+                    });
+                } else {
+                    error!("    DIAGNOSTIC [{}]: Video Record test ({}s) did not produce a file, though the operation succeeded, in {:?}.", cam_name, video_duration_secs, vid_test_start.elapsed());
+                    results.push(DiagnosticResult {
+                        test_name: format!("Video Record ('{}', {}s)", cam_name, video_duration_secs),
+                        success: false,
+                        details: "Operation succeeded but no video file was created.".to_string(),
+                    });
+                }
             },
             Err(e) => {
                 error!("    DIAGNOSTIC [{}]: Video Record test ({}s) FAILED in {:?}: {:#}", cam_name, video_duration_secs, vid_test_start.elapsed(), e);

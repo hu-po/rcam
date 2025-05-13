@@ -52,19 +52,7 @@ impl CameraManager {
                 debug!("  Camera not found: {}", name);
             }
         }
-        debug!("Retrieved {} cameras by name in {:?}", result.len(), start_time.elapsed());
+        debug!("Retrieved {} cameras by names in {:?}", result.len(), start_time.elapsed());
         result
     }
-
 }
-
-// Helper to parse comma-separated camera names from CLI
-pub fn parse_camera_names_arg(names_str_opt: Option<&String>) -> Option<Vec<String>> {
-    debug!("📝 Parsing camera names argument: {:?}", names_str_opt);
-    let start_time = Instant::now();
-    let result = names_str_opt.map(|names_str| {
-        names_str.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
-    });
-    debug!("Parsed camera names: {:?} in {:?}", result, start_time.elapsed());
-    result
-} 

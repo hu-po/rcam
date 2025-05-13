@@ -1,12 +1,10 @@
 use crate::config_loader::MasterConfig;
 use crate::core::camera_manager::CameraManager;
 use crate::camera::camera_media::CameraMediaManager;
-use anyhow::Result;
-use crate::common::file_utils;
-use crate::operations::op_helper::run_generic_camera_op;
+use anyhow::{Result, anyhow};
+use crate::operations::op_helper;
 use clap::ArgMatches;
-use log::{info, error, debug};
-use std::time::Duration;
+use log::{info, error, debug, warn};
 use std::time::Instant;
 
 pub async fn handle_capture_image_cli(
@@ -15,75 +13,99 @@ pub async fn handle_capture_image_cli(
     args: &ArgMatches,
 ) -> Result<()> {
     let op_start_time = Instant::now();
-    let delay_seconds_arg = args.get_one::<u64>("delay").copied();
-    let delay_option = delay_seconds_arg.map(Duration::from_secs);
+    let operation_display_name = "Image Capture";
+
+    if args.contains_id("delay") {
+        warn!("⚠️ The --delay argument is ignored for image capture as it is now always synchronized.");
+    }
     debug!(
-        "Capture image CLI: delay_arg: {:?}, cameras_arg: {:?}, output_arg: {:?}",
-        delay_seconds_arg, args.get_one::<String>("cameras"), args.get_one::<String>("output")
+        "Capture image CLI: cameras_arg: {:?}, output_arg: {:?}",
+        args.get_one::<String>("cameras"), args.get_one::<String>("output")
     );
-    info!("🖼️ Preparing to capture images from specified cameras{}.", delay_option.map_or_else(String::new, |d| format!(" with a delay of {:?}", d)));
+    info!("🖼️ Preparing to capture images from specified cameras.");
     
     let media_manager_init_start = Instant::now();
     let media_manager = CameraMediaManager::new();
     debug!("CameraMediaManager initialized for image capture in {:?}.", media_manager_init_start.elapsed());
 
-    let result = run_generic_camera_op(
-        master_config,
+    let camera_entities = op_helper::determine_target_cameras(
         camera_manager,
+        args.get_one::<String>("cameras"),
+        operation_display_name
+    ).await?;
+
+    if camera_entities.is_empty() {
+        info!("No cameras selected or available for image capture. Exiting.");
+        return Ok(());
+    }
+
+    let mut cameras_info = Vec::new();
+    for cam_entity_arc in &camera_entities {
+        let cam_entity = cam_entity_arc.lock().await;
+        let name = cam_entity.config.name.clone();
+        match cam_entity.get_rtsp_url() {
+            Ok(url) => cameras_info.push((name, url)),
+            Err(e) => {
+                error!("Failed to get RTSP URL for camera '{}' for {}: {}. This camera will be excluded.", name, operation_display_name, e);
+            }
+        }
+    }
+    
+    if cameras_info.is_empty() {
+        error!("Could not retrieve RTSP URLs for any of the {} selected/available cameras. Cannot proceed with {}.", camera_entities.len(), operation_display_name);
+        return Err(anyhow!("Failed to retrieve any usable RTSP URLs for image capture"));
+    }
+
+    let output_dir = op_helper::determine_operation_output_dir(
+        master_config,
         args,
-        "Image Capture",
         "output",
         Some("images"),
-        move |cam_entity_arc, app_settings_arc, operation_output_dir| {
-            let media_manager_clone = media_manager.clone();
-            let delay_clone = delay_option.clone();
+        operation_display_name
+    )?;
 
-            async move {
-                let cam_op_start_time = Instant::now();
-                let mut cam_entity = cam_entity_arc.lock().await;
-                let cam_name = cam_entity.config.name.clone();
-                
-                let filename = file_utils::generate_timestamped_filename(
-                    &cam_entity.config.name,
-                    &app_settings_arc.filename_timestamp_format,
-                    &app_settings_arc.image_format
-                );
-                let output_path = operation_output_dir.join(filename);
-                
-                info!("📸 Attempting to capture image for '{}' to {}{}",
-                    cam_name,
-                    output_path.display(),
-                    delay_clone.map_or_else(String::new, |d| format!(" after {:?} delay", d))
-                );
+    info!(
+        "📸 Attempting image capture for {} camera(s) to {}.",
+        cameras_info.len(),
+        output_dir.display()
+    );
 
-                match media_manager_clone.capture_image(
-                    &mut *cam_entity, 
-                    &app_settings_arc,
-                    output_path.clone(), 
-                    delay_clone
-                ).await {
-                    Ok(path) => {
-                        info!("✅ Successfully captured image for '{}' to {} in {:?}.",
-                            cam_name, path.display(), cam_op_start_time.elapsed()
-                        );
-                        Ok(())
-                    }
-                    Err(e) => {
-                        error!("❌ Failed to capture image for '{}' after {:?}: {:#}",
-                            cam_name, cam_op_start_time.elapsed(), e
-                        );
-                        Err(e)
-                    }
+    match media_manager
+        .capture_image(
+            &cameras_info,
+            &master_config.app_settings,
+            output_dir.clone(),
+        )
+        .await
+    {
+        Ok(paths) => {
+            if paths.is_empty() && !cameras_info.is_empty() {
+                warn!(
+                    "🖼️ Image capture completed but no files were produced. This might indicate an issue during capture for all cameras."
+                );
+            } else if paths.is_empty() && cameras_info.is_empty() {
+                 info!("🖼️ Image capture: No cameras were processed (likely due to RTSP URL issues).");
+            } else {
+                info!(
+                    "✅ Successfully captured {} image file(s) in {:?}:",
+                    paths.len(),
+                    op_start_time.elapsed()
+                );
+                for path in paths {
+                    info!("  -> {}", path.display());
                 }
             }
-        },
-    )
-    .await;
-
-    if result.is_ok() {
-        info!("🖼️ All image capture operations completed successfully in {:?}.", op_start_time.elapsed());
-    } else {
-        error!("🖼️ Image capture operation failed after {:?}. See errors above.", op_start_time.elapsed());
+            info!("🖼️ All image capture operations completed in {:?}.", op_start_time.elapsed());
+            Ok(())
+        }
+        Err(e) => {
+            error!(
+                "❌ Failed image capture for {} camera(s) after {:?}: {:#}",
+                cameras_info.len(),
+                op_start_time.elapsed(),
+                e
+            );
+            Err(e)
+        }
     }
-    result
 } 

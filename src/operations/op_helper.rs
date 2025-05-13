@@ -1,6 +1,6 @@
 use crate::config_loader::MasterConfig;
 use crate::app_config::ApplicationConfig;
-use crate::core::camera_manager::{CameraManager, parse_camera_names_arg};
+use crate::core::camera_manager::CameraManager;
 use crate::camera::camera_entity::CameraEntity;
 use anyhow::{Context, Result};
 use clap::ArgMatches;
@@ -11,6 +11,82 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use std::time::Instant;
+
+/// Parses the camera names argument from CLI.
+/// Returns Some(Vec<String>) if specific names are provided, None otherwise.
+fn parse_camera_names_arg_local(specific_cameras_arg: Option<&String>) -> Option<Vec<String>> {
+    specific_cameras_arg.map(|s| s.split(',').map(|name| name.trim().to_string()).collect())
+}
+
+/// Determines the target cameras based on CLI arguments or all available cameras.
+pub async fn determine_target_cameras(
+    camera_manager: &CameraManager,
+    specific_cameras_arg: Option<&String>,
+    operation_display_name: &str, // For logging context
+) -> Result<Vec<Arc<Mutex<CameraEntity>>>> {
+    let camera_parse_start = Instant::now();
+    let camera_names_to_process = parse_camera_names_arg_local(specific_cameras_arg);
+    debug!(
+        "  Parsed camera selection for '{}' in {:?}. CLI arg: {:?}, Parsed: {:?}",
+        operation_display_name, camera_parse_start.elapsed(), specific_cameras_arg, camera_names_to_process
+    );
+
+    let cameras_fetch_start = Instant::now();
+    let cameras_to_target = match camera_names_to_process {
+        Some(ref names) => {
+            debug!("  Fetching specific cameras by names: {:?} for '{}'", names, operation_display_name);
+            camera_manager.get_cameras_by_names(names).await
+        }
+        None => {
+            debug!("  Fetching all available cameras for '{}'", operation_display_name);
+            camera_manager.get_all_cameras().await
+        }
+    };
+    debug!("  Fetched {} target cameras for '{}' in {:?}.", cameras_to_target.len(), operation_display_name, cameras_fetch_start.elapsed());
+    Ok(cameras_to_target)
+}
+
+/// Determines and creates the operation's base output directory.
+pub fn determine_operation_output_dir(
+    master_config: &MasterConfig,
+    args: &ArgMatches,
+    output_cli_arg_key: &str,
+    default_output_subdir: Option<&str>,
+    operation_display_name: &str, // For logging context
+) -> Result<PathBuf> {
+    let output_dir_determine_start = Instant::now();
+    let operation_base_output_dir: PathBuf = match args.get_one::<String>(output_cli_arg_key) {
+        Some(path_str) => {
+            debug!("  Output directory specified via CLI for '{}': {}", operation_display_name, path_str);
+            PathBuf::from(path_str)
+        }
+        None => {
+            let mut dir = PathBuf::from(&master_config.app_settings.output_directory);
+            if let Some(subdir) = default_output_subdir {
+                dir.push(subdir);
+                debug!("  Using default output directory with subdir for '{}': {}", operation_display_name, dir.display());
+            } else {
+                debug!("  Using default output directory for '{}': {}", operation_display_name, dir.display());
+            }
+            dir
+        }
+    };
+    debug!("  Determined operation base output directory for '{}' as '{}' in {:?}.", operation_display_name, operation_base_output_dir.display(), output_dir_determine_start.elapsed());
+
+    if !operation_base_output_dir.exists() {
+        info!("📁 Output directory {} does not exist. Creating it for '{}'.", operation_base_output_dir.display(), operation_display_name);
+        let create_dir_start = Instant::now();
+        std::fs::create_dir_all(&operation_base_output_dir)
+            .with_context(|| format!(
+                    "❌ Failed to create output directory '{}' for '{}'",
+                    operation_base_output_dir.display(), operation_display_name
+            ))?;
+        info!("  ✅ Created output directory '{}' for '{}' in {:?}", operation_base_output_dir.display(), operation_display_name, create_dir_start.elapsed());
+    } else {
+        info!("ℹ️ Using existing output directory: {} for '{}'", operation_base_output_dir.display(), operation_display_name);
+    }
+    Ok(operation_base_output_dir)
+}
 
 /// Helper function to orchestrate an operation across multiple cameras.
 ///
@@ -55,37 +131,25 @@ where
     let op_helper_start_time = Instant::now();
     info!("🛠️ Starting generic operation: '{}'...", operation_display_name);
 
-    // 1. Parse camera selection
-    let camera_parse_start = Instant::now();
-    let specific_cameras_arg = args.get_one::<String>("cameras"); // Assuming "cameras" is the standard key
-    let camera_names_to_process = parse_camera_names_arg(specific_cameras_arg);
-    debug!(
-        "  Parsed camera selection for '{}' in {:?}. CLI arg: {:?}, Parsed: {:?}",
-        operation_display_name, camera_parse_start.elapsed(), specific_cameras_arg, camera_names_to_process
-    );
-
-    let cameras_fetch_start = Instant::now();
-    let cameras_to_target = match camera_names_to_process {
-        Some(ref names) => {
-            debug!("  Fetching specific cameras by names: {:?} for '{}'", names, operation_display_name);
-            camera_manager.get_cameras_by_names(names).await
-        }
-        None => {
-            debug!("  Fetching all available cameras for '{}'", operation_display_name);
-            camera_manager.get_all_cameras().await
-        }
-    };
-    debug!("  Fetched {} target cameras for '{}' in {:?}.", cameras_to_target.len(), operation_display_name, cameras_fetch_start.elapsed());
+    // 1. Parse camera selection & Fetch target cameras
+    let cameras_to_target = determine_target_cameras(
+        camera_manager, 
+        args.get_one::<String>("cameras"), // Assuming "cameras" is the standard key for camera names
+        operation_display_name
+    ).await?;
 
     if cameras_to_target.is_empty() {
-        if let Some(names) = camera_names_to_process {
+        // determine_target_cameras does not log this specific warning, so we keep it here or move it there.
+        // For now, keeping the warning logic distinct to run_generic_camera_op based on its role.
+        let specific_cameras_arg = args.get_one::<String>("cameras");
+        if parse_camera_names_arg_local(specific_cameras_arg).is_some() { // Check if specific names were given
             warn!(
-                "⚠️ No cameras found matching names: {:?} for '{}'. Operation finished in {:?}",
-                names, operation_display_name, op_helper_start_time.elapsed()
+                "⚠️ No cameras found matching the provided names for '{}'. Operation finished in {:?}",
+                operation_display_name, op_helper_start_time.elapsed()
             );
         } else {
             warn!(
-                "⚠️ No cameras configured or found for '{}'. Operation finished in {:?}",
+                "⚠️ No cameras configured or available for '{}'. Operation finished in {:?}",
                 operation_display_name, op_helper_start_time.elapsed()
             );
         }
@@ -94,37 +158,13 @@ where
     info!("🎯 Targeting {} camera(s) for {}.", cameras_to_target.len(), operation_display_name);
 
     // 2. Determine and create output directory
-    let output_dir_determine_start = Instant::now();
-    let operation_base_output_dir: PathBuf = match args.get_one::<String>(output_cli_arg_key) {
-        Some(path_str) => {
-            debug!("  Output directory specified via CLI for '{}': {}", operation_display_name, path_str);
-            PathBuf::from(path_str)
-        }
-        None => {
-            let mut dir = PathBuf::from(&master_config.app_settings.output_directory);
-            if let Some(subdir) = default_output_subdir {
-                dir.push(subdir);
-                debug!("  Using default output directory with subdir for '{}': {}", operation_display_name, dir.display());
-            } else {
-                debug!("  Using default output directory for '{}': {}", operation_display_name, dir.display());
-            }
-            dir
-        }
-    };
-    debug!("  Determined operation base output directory for '{}' as '{}' in {:?}.", operation_display_name, operation_base_output_dir.display(), output_dir_determine_start.elapsed());
-
-    if !operation_base_output_dir.exists() {
-        info!("📁 Output directory {} does not exist. Creating it for '{}'.", operation_base_output_dir.display(), operation_display_name);
-        let create_dir_start = Instant::now();
-        std::fs::create_dir_all(&operation_base_output_dir)
-            .with_context(|| format!(
-                    "❌ Failed to create output directory '{}' for '{}'",
-                    operation_base_output_dir.display(), operation_display_name
-            ))?;
-        info!("  ✅ Created output directory '{}' for '{}' in {:?}", operation_base_output_dir.display(), operation_display_name, create_dir_start.elapsed());
-    } else {
-        info!("ℹ️ Using existing output directory: {} for '{}'", operation_base_output_dir.display(), operation_display_name);
-    }
+    let operation_base_output_dir = determine_operation_output_dir(
+        master_config, 
+        args, 
+        output_cli_arg_key, 
+        default_output_subdir, 
+        operation_display_name
+    )?;
 
     // 3. Spawn tasks
     let task_spawn_loop_start = Instant::now();

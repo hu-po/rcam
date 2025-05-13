@@ -2,10 +2,9 @@ use crate::config_loader::MasterConfig;
 use crate::core::camera_manager::CameraManager;
 use crate::camera::camera_media::CameraMediaManager;
 use anyhow::Result;
-use crate::common::file_utils;
-use crate::operations::op_helper::run_generic_camera_op;
+use crate::operations::op_helper;
 use clap::ArgMatches;
-use log::{info, error, debug};
+use log::{info, error, debug, warn};
 use std::time::Duration;
 use std::time::Instant;
 
@@ -15,6 +14,8 @@ pub async fn handle_record_video_cli(
     args: &ArgMatches,
 ) -> Result<()> {
     let op_start_time = Instant::now();
+    let operation_display_name = "Video Recording";
+
     let duration_seconds_arg = args.get_one::<u64>("duration").copied();
     let duration_seconds = duration_seconds_arg.unwrap_or(master_config.app_settings.video_duration_default_seconds as u64);
     let recording_duration = Duration::from_secs(duration_seconds);
@@ -28,73 +29,86 @@ pub async fn handle_record_video_cli(
     let media_manager = CameraMediaManager::new();
     debug!("CameraMediaManager initialized for video recording in {:?}.", media_manager_init_start.elapsed());
 
-    let result = run_generic_camera_op(
+    let camera_entities = op_helper::determine_target_cameras(
+        camera_manager, 
+        args.get_one::<String>("cameras"),
+        operation_display_name
+    ).await?;
+
+    if camera_entities.is_empty() {
+        info!("No cameras selected or available for video recording. Exiting.");
+        return Ok(());
+    }
+
+    let mut cameras_info = Vec::new();
+    for cam_entity_arc in &camera_entities {
+        let cam_entity = cam_entity_arc.lock().await;
+        let name = cam_entity.config.name.clone();
+        match cam_entity.get_rtsp_url() {
+            Ok(url) => cameras_info.push((name, url)),
+            Err(e) => {
+                error!("Failed to get RTSP URL for camera '{}' for {}: {}. This camera will be excluded.", name, operation_display_name, e);
+            }
+        }
+    }
+    
+    if cameras_info.is_empty() {
+        error!("Could not retrieve RTSP URLs for any of the {} selected/available cameras. Cannot proceed with {}.", camera_entities.len(), operation_display_name);
+        return Err(anyhow::anyhow!("Failed to retrieve any usable RTSP URLs for video recording"));
+    }
+
+    let default_subdir_name = master_config.app_settings.video_format.clone();
+    let output_dir = op_helper::determine_operation_output_dir(
         master_config,
-        camera_manager,
         args,
-        "Video Recording",
         "output",
-        Some("videos"),
-        move |cam_entity_arc, app_settings_arc, operation_output_dir| {
-            let media_manager_clone = media_manager.clone();
-            let recording_duration_clone = recording_duration;
+        Some(&default_subdir_name), 
+        operation_display_name
+    )?;
 
-            async move {
-                let cam_op_start_time = Instant::now();
-                let mut cam_entity = cam_entity_arc.lock().await;
-                let cam_name = cam_entity.config.name.clone();
-                
-                let filename = file_utils::generate_timestamped_filename(
-                    &cam_entity.config.name,
-                    &app_settings_arc.filename_timestamp_format,
-                    &app_settings_arc.video_format,
+    info!(
+        "🎬 Attempting video recording for {} camera(s) to {} for {:?}.",
+        cameras_info.len(),
+        output_dir.display(),
+        recording_duration
+    );
+
+    match media_manager
+        .record_video(
+            &cameras_info,
+            &master_config.app_settings,
+            output_dir.clone(), 
+            recording_duration,
+        )
+        .await
+    {
+        Ok(paths) => {
+            if paths.is_empty() && !cameras_info.is_empty() {
+                warn!(
+                    "📹 Video recording completed but no files were produced. This might indicate an issue during recording for all cameras."
                 );
-                let output_path = operation_output_dir.join(filename);
-                
+            } else if paths.is_empty() && cameras_info.is_empty() {
+                 info!("📹 Video recording: No cameras were processed (likely due to RTSP URL issues).");
+            } else {
                 info!(
-                    "🎬 Preparing to record video for '{}' to {} for {:?}",
-                    cam_name,
-                    output_path.display(),
-                    recording_duration_clone
+                    "✅ Successfully recorded {} video file(s) in {:?}:",
+                    paths.len(),
+                    op_start_time.elapsed()
                 );
-
-                match media_manager_clone
-                    .record_video(
-                        &mut *cam_entity,
-                        &app_settings_arc,
-                        output_path.clone(),
-                        recording_duration_clone,
-                    )
-                    .await
-                {
-                    Ok(path) => {
-                        info!(
-                            "✅ Successfully recorded video for '{}' to {} in {:?}",
-                            cam_name,
-                            path.display(),
-                            cam_op_start_time.elapsed()
-                        );
-                        Ok(())
-                    }
-                    Err(e) => {
-                        error!(
-                            "❌ Failed to record video for '{}' after {:?}: {:#}",
-                            cam_name,
-                            cam_op_start_time.elapsed(),
-                            e
-                        );
-                        Err(e)
-                    }
+                for path in paths {
+                    info!("  -> {}", path.display());
                 }
             }
-        },
-    )
-    .await;
-
-    if result.is_ok() {
-        info!("📹 All video recording operations completed successfully in {:?}", op_start_time.elapsed());
-    } else {
-        error!("📹 Video recording operation failed after {:?}. See errors above.", op_start_time.elapsed());
+            Ok(())
+        }
+        Err(e) => {
+            error!(
+                "❌ Failed video recording for {} camera(s) after {:?}: {:#}",
+                cameras_info.len(),
+                op_start_time.elapsed(),
+                e
+            );
+            Err(e)
+        }
     }
-    result
 } 

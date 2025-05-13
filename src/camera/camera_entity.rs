@@ -1,21 +1,12 @@
 use crate::camera_config::CameraConfig;
 use anyhow::{Result, bail};
 use std::env;
-use log::{info, warn, debug};
+use log::{warn, debug};
 use std::time::Instant;
-use std::sync::{Arc, Mutex};
-
-#[derive(Debug, Clone)]
-pub enum CameraState {
-    Idle,
-    Connecting,
-    Connected,
-}
 
 #[derive(Debug, Clone)]
 pub struct CameraEntity {
     pub config: CameraConfig,
-    pub state: Arc<Mutex<CameraState>>,
     password: Option<String>,
 }
 
@@ -25,7 +16,6 @@ impl CameraEntity {
         debug!("Attempting to create CameraEntity for '{}'", config.name);
         let mut entity = Self {
             config: config.clone(),
-            state: Arc::new(Mutex::new(CameraState::Idle)),
             password: None,
         };
         entity.load_password();
@@ -54,11 +44,6 @@ impl CameraEntity {
     pub fn get_password(&self) -> Option<&str> {
         debug!("🔑 Requesting password for camera: {}", self.config.name);
         self.password.as_deref()
-    }
-
-    pub fn update_state(&mut self, new_state: CameraState) {
-        info!("🔄 Camera \'{}\' state changed from {:?} to {:?} ✨", self.config.name, self.state.lock().unwrap().clone(), new_state);
-        *self.state.lock().unwrap() = new_state;
     }
 
     pub fn get_rtsp_url(&self) -> Result<String> {
