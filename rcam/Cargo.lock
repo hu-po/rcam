@@ -1464,6 +1464,7 @@ dependencies = [
  "chrono",
  "clap",
  "env_logger",
+ "futures",
  "image",
  "log",
  "opencv",

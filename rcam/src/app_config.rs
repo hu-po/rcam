@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct ApplicationConfig {
     pub output_directory: String,
     pub image_format: String, // e.g., "jpg", "png"

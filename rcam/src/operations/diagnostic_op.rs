@@ -4,13 +4,16 @@ use crate::errors::AppError;
 use clap::ArgMatches;
 use log::{info, warn, error};
 use std::path::PathBuf;
-use std::time::Duration;
+// use std::time::Duration; // Marked as unused
 
 // Import operation handlers
-use super::image_capture_op;
-use super::video_record_op;
-use super::time_sync_op;
-use super::camera_control_op;
+use crate::camera::camera_media::CameraMediaManager; 
+use crate::common::file_utils;
+// use super::image_capture_op; // Refactored to call logic directly
+// use super::video_record_op; // Refactored to call logic directly
+use super::time_sync_op; // Still used
+// use super::camera_control_op; // Refactored to call logic directly
+use crate::camera::camera_controller::CameraController;
 
 struct DiagnosticResult {
     test_name: String,
@@ -68,21 +71,33 @@ pub async fn handle_diagnostic_cli(
         let image_diag_output_dir = diagnostic_output_dir.join(&cam_name).join("image");
         std::fs::create_dir_all(&image_diag_output_dir).ok(); // Best effort
         
-        // Construct mock CLI args for single image capture
-        let single_cam_name_vec = vec![("cameras".to_string(), cam_name.clone())];
-        let output_arg_vec = vec![("output".to_string(), image_diag_output_dir.to_string_lossy().to_string())];
-        let image_args_map: std::collections::HashMap<String, clap::parser::RawValues> = 
-            single_cam_name_vec.into_iter().chain(output_arg_vec.into_iter())
-            .map(|(k,v)| (k, clap::parser::RawValues::new(vec![v.into()])))
-            .collect();
-        let image_args = ArgMatches::from_iter_map(image_args_map);
-
+        // Directly call image capture logic
         info!("DIAGNOSTIC [{}]: Running image capture test...", cam_name);
-        match image_capture_op::handle_capture_image_cli(master_config, camera_manager, &image_args).await {
-            Ok(_) => results.push(DiagnosticResult {
+        let media_manager_img = CameraMediaManager::new();
+        let app_config_img_clone = master_config.app_settings.clone();
+        
+        let task_cam_entity_arc = cam_arc.clone(); // Clone Arc for the async block
+        let task_image_diag_output_dir = image_diag_output_dir.clone();
+
+        // This part is now simplified to directly call the capture logic
+        // No need to construct ArgMatches for image capture test
+        let image_capture_future = async move {
+            let mut cam_entity = task_cam_entity_arc.lock().await;
+            let filename = file_utils::generate_timestamped_filename(
+                &cam_entity.config.name,
+                &app_config_img_clone.filename_timestamp_format,
+                &app_config_img_clone.image_format
+            );
+            let output_path = task_image_diag_output_dir.join(filename);
+            // Using None for delay_option as it's a basic diagnostic
+            media_manager_img.capture_image(&mut *cam_entity, &app_config_img_clone, output_path.clone(), None).await
+        };
+        
+        match image_capture_future.await {
+            Ok(path) => results.push(DiagnosticResult {
                 test_name: format!("Image Capture ('{}')", cam_name),
                 success: true,
-                details: format!("Completed. Image saved in {}", image_diag_output_dir.display()),
+                details: format!("Completed. Image saved in {}", path.display()),
             }),
             Err(e) => results.push(DiagnosticResult {
                 test_name: format!("Image Capture ('{}')", cam_name),
@@ -94,43 +109,61 @@ pub async fn handle_diagnostic_cli(
         // 3. Test short video capture per camera
         let video_diag_output_dir = diagnostic_output_dir.join(&cam_name).join("video");
         std::fs::create_dir_all(&video_diag_output_dir).ok(); // Best effort
-        let video_duration_arg_vec = vec![("duration".to_string(), "5".to_string())]; // 5 second video
-        let video_output_arg_vec = vec![("output".to_string(), video_diag_output_dir.to_string_lossy().to_string())];
-        let video_args_map: std::collections::HashMap<String, clap::parser::RawValues> = 
-            single_cam_name_vec.iter().cloned().chain(video_duration_arg_vec.into_iter()).chain(video_output_arg_vec.into_iter())
-            .map(|(k,v)| (k, clap::parser::RawValues::new(vec![v.into()])))
-            .collect();
-        let video_args = ArgMatches::from_iter_map(video_args_map);
+        let video_duration_secs: u64 = 5; // 5 second video for diagnostics
         
-        info!("DIAGNOSTIC [{}]: Running short video capture test (5s)...", cam_name);
-        match video_record_op::handle_record_video_cli(master_config, camera_manager, &video_args).await {
-            Ok(_) => results.push(DiagnosticResult {
-                test_name: format!("Video Record ('{}', 5s)", cam_name),
+        info!("DIAGNOSTIC [{}]: Running short video capture test ({}s)...", cam_name, video_duration_secs);
+        let media_manager_vid = CameraMediaManager::new();
+        let app_config_vid_clone = master_config.app_settings.clone();
+        let task_cam_entity_arc_vid = cam_arc.clone();
+        let task_video_diag_output_dir = video_diag_output_dir.clone();
+
+        // Directly call video recording logic
+        let video_record_future = async move {
+            let mut cam_entity = task_cam_entity_arc_vid.lock().await;
+            let filename = file_utils::generate_timestamped_filename(
+                &cam_entity.config.name,
+                &app_config_vid_clone.filename_timestamp_format,
+                &app_config_vid_clone.video_format
+            );
+            let output_path = task_video_diag_output_dir.join(filename);
+            let recording_duration = std::time::Duration::from_secs(video_duration_secs);
+            media_manager_vid.record_video(&mut *cam_entity, &app_config_vid_clone, output_path.clone(), recording_duration).await
+        };
+
+        match video_record_future.await {
+            Ok(path) => results.push(DiagnosticResult {
+                test_name: format!("Video Record ('{}', {}s)", cam_name, video_duration_secs),
                 success: true,
-                details: format!("Completed. Video saved in {}", video_diag_output_dir.display()),
+                details: format!("Completed. Video saved in {}", path.display()),
             }),
             Err(e) => results.push(DiagnosticResult {
-                test_name: format!("Video Record ('{}', 5s)", cam_name),
+                test_name: format!("Video Record ('{}', {}s)", cam_name, video_duration_secs),
                 success: false,
                 details: format!("Failed: {}", e),
             }),
         }
 
         // 4. Test enable/disable stream (will likely show warnings/errors)
-        for action_bool in [true, false] {
+        let camera_controller_diag = CameraController::new();
+        for action_bool in [true, false] { // Test both enable (true) and disable (false)
             let action_str = if action_bool { "enable" } else { "disable" };
-            let control_action_arg_vec = vec![("action".to_string(), action_str.to_string())];
-            let control_args_map: std::collections::HashMap<String, clap::parser::RawValues> = 
-                single_cam_name_vec.iter().cloned().chain(control_action_arg_vec.into_iter())
-                .map(|(k,v)| (k, clap::parser::RawValues::new(vec![v.into()])))
-                .collect();
-            let control_args = ArgMatches::from_iter_map(control_args_map);
-
             info!("DIAGNOSTIC [{}]: Running control action: {}...", cam_name, action_str);
-            match camera_control_op::handle_control_camera_cli(master_config, camera_manager, &control_args).await {
-                Ok(_) => results.push(DiagnosticResult {
+            
+            let task_cam_entity_arc_ctrl = cam_arc.clone();
+            let controller_clone_diag = camera_controller_diag.clone(); // Assuming CameraController is Clone
+
+            // Directly call camera control logic
+            let control_future = async move {
+                let cam_entity = task_cam_entity_arc_ctrl.lock().await;
+                // The info messages are now inside this block, similar to the original op
+                // info!("Attempting to {} camera: '{}'", if action_bool {"enable"} else {"disable"}, cam_entity.config.name);
+                controller_clone_diag.set_camera_enabled(&*cam_entity, action_bool).await
+            };
+
+            match control_future.await {
+                Ok(()) => results.push(DiagnosticResult {
                     test_name: format!("Control Action ('{}': {})", cam_name, action_str),
-                    success: true, // Success means the op itself didn't error, not that the camera necessarily obeyed
+                    success: true, 
                     details: "Completed. Check logs for camera response.".to_string(),
                 }),
                 Err(e) => results.push(DiagnosticResult {

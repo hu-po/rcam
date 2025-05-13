@@ -1,11 +1,13 @@
+use crate::app_config::ApplicationConfig;
+// use crate::camera_config::CameraConfig as RawCameraConfig; // Renamed to avoid conflict if we have another CameraConfig
 use crate::camera::camera_entity::CameraEntity;
-use crate::camera_config::CameraConfig as RawCameraConfig; // Renamed to avoid conflict if we have another CameraConfig
+use crate::camera::CameraConfig as DomainCameraConfig; // Aliasing for clarity
 use crate::config_loader::MasterConfig;
 use crate::errors::AppError;
+use log::{info}; // Removed warn
 use std::collections::HashMap;
 use std::sync::Arc; // For sharing CameraManager or parts of it across tasks
 use tokio::sync::Mutex; // For mutable access to camera entities
-use log::{info, warn};
 
 
 pub struct CameraManager {

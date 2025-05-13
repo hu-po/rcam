@@ -1,7 +1,9 @@
 use crate::common::timestamp_utils;
-use std::path::{Path, PathBuf};
+use std::path::{PathBuf};
 use crate::errors::AppError;
 use log::debug;
+use std::fs;
+use chrono::Local;
 
 pub fn generate_timestamped_filename(
     base_name: &str,      // e.g., camera name

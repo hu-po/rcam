@@ -1,7 +1,7 @@
 use crate::camera::camera_entity::CameraEntity;
 use crate::errors::AppError;
-// CameraInterfacePreference import removed
-use log::{info, warn, error};
+use log::{info, warn};
+use std::sync::Arc;
 // reqwest::Client import might be needed if HTTP CGI is fleshed out
 // use reqwest::Client; 
 

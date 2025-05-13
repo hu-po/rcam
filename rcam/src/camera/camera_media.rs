@@ -49,7 +49,7 @@ impl CameraMediaManager {
         // OpenCV operations are blocking, so spawn_blocking is essential.
         let capture_result = tokio::task::spawn_blocking(move || -> Result<PathBuf, AppError> {
             info!("OpenCV (blocking): Connecting to RTSP URL: {} for image capture for camera '{}'", rtsp_url, cam_name);
-            let mut cap = videoio::VideoCapture::from_url(&rtsp_url, videoio::CAP_ANY)
+            let mut cap = videoio::VideoCapture::from_file(rtsp_url.as_str(), videoio::CAP_ANY)
                 .map_err(|e| AppError::OpenCV(format!("Failed to create VideoCapture for '{}': {}", cam_name, e)))?;
             
             let opened = videoio::VideoCapture::is_opened(&cap)
@@ -117,7 +117,7 @@ impl CameraMediaManager {
         // OpenCV operations are blocking
         let record_result = tokio::task::spawn_blocking(move || -> Result<PathBuf, AppError> {
             info!("OpenCV (blocking): Connecting to RTSP URL: {} for video recording for '{}'", rtsp_url, cam_name);
-            let mut cap = videoio::VideoCapture::from_url(&rtsp_url, videoio::CAP_ANY)
+            let mut cap = videoio::VideoCapture::from_file(rtsp_url.as_str(), videoio::CAP_ANY)
                 .map_err(|e| AppError::OpenCV(format!("VideoCapture creation failed for '{}': {}", cam_name, e)))?;
             let opened = videoio::VideoCapture::is_opened(&cap)
                 .map_err(|e| AppError::OpenCV(format!("VideoCapture::is_opened check failed for '{}': {}", cam_name, e)))?;
