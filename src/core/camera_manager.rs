@@ -1,19 +1,14 @@
-use crate::app_config::ApplicationConfig;
-// use crate::camera_config::CameraConfig as RawCameraConfig; // Renamed to avoid conflict if we have another CameraConfig
 use crate::camera::camera_entity::CameraEntity;
-use crate::camera::CameraConfig as DomainCameraConfig; // Aliasing for clarity
 use crate::config_loader::MasterConfig;
 use crate::errors::AppError;
-use log::{info}; // Removed warn
+use log::{info};
 use std::collections::HashMap;
-use std::sync::Arc; // For sharing CameraManager or parts of it across tasks
-use tokio::sync::Mutex; // For mutable access to camera entities
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 
 pub struct CameraManager {
-    // Using Arc<Mutex<...>> for individual cameras to allow concurrent, independent operations.
     cameras: HashMap<String, Arc<Mutex<CameraEntity>>>,
-    // app_config: Arc<ApplicationConfig>, // If global app settings are needed frequently
 }
 
 impl CameraManager {
@@ -54,15 +49,6 @@ impl CameraManager {
         result
     }
 
-    // Example of a method that might orchestrate an action across multiple cameras
-    // pub async fn check_all_camera_statuses(&self) {
-    //     info!("Checking status for all cameras...");
-    //     for (name, cam_mutex) in &self.cameras {
-    //         let cam = cam_mutex.lock().await;
-    //         info!("Camera '{}' current state: {:?}", name, cam.state);
-    //         // Here you could add more detailed checks, like pinging or short connections
-    //     }
-    // }
 }
 
 // Helper to parse comma-separated camera names from CLI

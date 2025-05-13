@@ -30,10 +30,10 @@ impl CameraMediaManager {
         output_path: PathBuf,
         delay: Option<Duration>, // Retained delay parameter
     ) -> Result<PathBuf, AppError> {
-        let cam_name = camera_entity.config.name.clone();
+        let cam_name_outer = camera_entity.config.name.clone();
         info!(
             "Attempting OpenCV image capture for camera: '{}' to {}",
-            cam_name,
+            cam_name_outer,
             output_path.display()
         );
         camera_entity.update_state(CameraState::Connecting);
@@ -46,8 +46,10 @@ impl CameraMediaManager {
         let output_path_clone = output_path.clone();
         let image_format = app_config.image_format.clone(); // Clone for closure
 
+        let cam_name_for_block = cam_name_outer.clone();
         // OpenCV operations are blocking, so spawn_blocking is essential.
         let capture_result = tokio::task::spawn_blocking(move || -> Result<PathBuf, AppError> {
+            let cam_name = cam_name_for_block;
             info!("OpenCV (blocking): Connecting to RTSP URL: {} for image capture for camera '{}'", rtsp_url, cam_name);
             let mut cap = videoio::VideoCapture::from_file(rtsp_url.as_str(), videoio::CAP_ANY)
                 .map_err(|e| AppError::OpenCV(format!("Failed to create VideoCapture for '{}': {}", cam_name, e)))?;
@@ -88,7 +90,7 @@ impl CameraMediaManager {
             info!("OpenCV (blocking): Image saved for '{}' to {}", cam_name, output_path_clone.display());
             cap.release().map_err(|e| AppError::OpenCV(format!("Failed to release VideoCapture for '{}': {}", cam_name,e)))?;
             Ok(output_path_clone)
-        }).await.map_err(|e| AppError::Task(format!("OpenCV image capture task failed for '{}': {}", cam_name, e)))??; // JoinError then AppError
+        }).await.map_err(|e| AppError::Task(format!("OpenCV image capture task failed for '{}': {}", cam_name_outer, e)))??; // JoinError then AppError
         
         camera_entity.update_state(CameraState::Connected); // Or Idle if one-off
         Ok(capture_result)
@@ -101,10 +103,10 @@ impl CameraMediaManager {
         output_path: PathBuf,
         duration: Duration,
     ) -> Result<PathBuf, AppError> {
-        let cam_name = camera_entity.config.name.clone();
+        let cam_name_outer = camera_entity.config.name.clone();
         info!(
             "Attempting OpenCV video recording for camera: '{}' to {} for {:?}",
-            cam_name,
+            cam_name_outer,
             output_path.display(),
             duration
         );
@@ -114,8 +116,10 @@ impl CameraMediaManager {
         let output_path_clone = output_path.clone();
         let app_config_clone = app_config.clone(); // Clone for the closure
 
+        let cam_name_for_block = cam_name_outer.clone();
         // OpenCV operations are blocking
         let record_result = tokio::task::spawn_blocking(move || -> Result<PathBuf, AppError> {
+            let cam_name = cam_name_for_block;
             info!("OpenCV (blocking): Connecting to RTSP URL: {} for video recording for '{}'", rtsp_url, cam_name);
             let mut cap = videoio::VideoCapture::from_file(rtsp_url.as_str(), videoio::CAP_ANY)
                 .map_err(|e| AppError::OpenCV(format!("VideoCapture creation failed for '{}': {}", cam_name, e)))?;
@@ -204,7 +208,7 @@ impl CameraMediaManager {
             }
 
             Ok(output_path_clone)
-        }).await.map_err(|e| AppError::Task(format!("OpenCV video recording task failed for '{}': {}", cam_name, e)))??;
+        }).await.map_err(|e| AppError::Task(format!("OpenCV video recording task failed for '{}': {}", cam_name_outer, e)))??;
 
         camera_entity.update_state(CameraState::Connected); // Or Idle
         Ok(record_result)

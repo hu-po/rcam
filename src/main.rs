@@ -38,8 +38,7 @@ async fn main() -> Result<(), AppError> {
             // We don't have `cfg` here, so pass None for config to initialize_logging.
             logging_setup::initialize_logging(None, &matches);
             error!("Failed to load master configuration from '{}': {}. Exiting.", config_path, e);
-            // return Err(e); // Propagate the config error
-            cfg
+            return Err(e); // Propagate the config error
         }
     };
 

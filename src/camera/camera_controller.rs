@@ -1,9 +1,6 @@
 use crate::camera::camera_entity::CameraEntity;
 use crate::errors::AppError;
 use log::{info, warn};
-use std::sync::Arc;
-// reqwest::Client import might be needed if HTTP CGI is fleshed out
-// use reqwest::Client; 
 
 #[derive(Clone)] // Added Clone for use in operations modules
 pub struct CameraController {
@@ -38,5 +35,4 @@ impl CameraController {
         Err(AppError::Control(format!("HTTP CGI set_camera_enabled not implemented for {}", camera.config.name)))
     }
 
-    // discover_rtsp_uri_onvif method removed
 } 
