@@ -2,6 +2,20 @@
 
 A tool for capturing images and videos from IP cameras using Rust.
 
+## Environment Variables
+
+This project uses a `.env` file to manage environment-specific configurations. Before running the application, ensure you have a `.env` file in the project root. If you have an example file (e.g., `.env.example`), copy it to `.env`:
+
+```bash
+cp .env.example .env
+```
+
+Then, source the environment variables:
+
+```bash
+source .env
+```
+
 ## Building
 
 - For a development build:
@@ -91,3 +105,5 @@ rcam test
 You might need to run the executable directly from the target folder if it's not in your PATH:
 - `target/debug/rcam <subcommand> [options]` (for development)
 - `target/release/rcam <subcommand> [options]` (for release)
+
+

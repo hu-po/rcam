@@ -13,17 +13,37 @@ application:
   log_level: "info" # e.g., "error", "warn", "info", "debug", "trace"
 
 cameras:
-  - name: "Cam1_LivingRoom"
-    ip: "192.168.1.101"
+  - name: "camera1"
+    device_name: "AMC108EF91BA102126"
+    ip: "192.168.1.91"
     username: "admin"
-    # Password should be set via environment variable: CAM1_LIVINGROOM_PASSWORD
-    # mac_address: "AA:BB:CC:DD:EE:FF" # Optional
-    rtsp_path_override: "/cam/realmonitor?channel=1&subtype=0" # Optional, full RTSP path
+    mac_address: "A0:60:32:05:E1:7C"
+    # Password should be set via environment variable: CAMERA1_PASSWORD
 
-  - name: "Cam2_Backyard"
-    ip: "192.168.1.102"
-    username: "user123"
-    # Password should be set via environment variable: CAM2_BACKYARD_PASSWORD
-    # rtsp_path_override: "/stream1" # This line can be uncommented if needed for this camera
+  - name: "camera2"
+    device_name: "AMC10802AF9B53A9D5"
+    ip: "192.168.1.92"
+    username: "admin"
+    mac_address: "A0:60:32:04:E4:D2"
+    # Password should be set via environment variable: CAMERA2_PASSWORD
 
-# Add more cameras as needed 
+  - name: "camera3"
+    device_name: "AMC10858C5C8435EF5"
+    ip: "192.168.1.93"
+    username: "admin"
+    mac_address: "A0:60:32:04:E7:6A"
+    # Password should be set via environment variable: CAMERA3_PASSWORD
+
+  - name: "camera4"
+    device_name: "AMC108D0D9673DEA55"
+    ip: "192.168.1.94"
+    username: "admin"
+    mac_address: "A0:60:32:04:EB:27"
+    # Password should be set via environment variable: CAMERA4_PASSWORD
+
+  - name: "camera5"
+    device_name: "AMC108A416274B2DA7"
+    ip: "192.168.1.95"
+    username: "admin"
+    mac_address: "A0:60:32:05:DF:C9"
+    # Password should be set via environment variable: CAMERA5_PASSWORD
