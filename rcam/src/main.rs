@@ -38,7 +38,8 @@ async fn main() -> Result<(), AppError> {
             // We don't have `cfg` here, so pass None for config to initialize_logging.
             logging_setup::initialize_logging(None, &matches);
             error!("Failed to load master configuration from '{}': {}. Exiting.", config_path, e);
-            return Err(e); // Propagate the config error
+            // return Err(e); // Propagate the config error
+            cfg
         }
     };
 
@@ -63,7 +64,7 @@ async fn main() -> Result<(), AppError> {
                 operations::video_record_op::handle_record_video_cli(&master_config, &camera_manager, subcommand_matches.1).await
             }
             "verify-times" => {
-                operations::time_sync_op::handle_verify_times_cli(&master_config, &camera_manager /*, subcommand_matches.1 */).await
+                operations::time_sync_op::handle_verify_times_cli(&master_config, &camera_manager).await
             }
             "control" => {
                 operations::camera_control_op::handle_control_camera_cli(&master_config, &camera_manager, subcommand_matches.1).await
@@ -79,13 +80,10 @@ async fn main() -> Result<(), AppError> {
 
         if let Err(e) = op_result {
             error!("Operation '{}' failed: {}", subcommand_matches.0, e);
-            // Decide if this should cause an exit or just log
-            // return Err(e); // Or handle more gracefully
         }
 
     } else {
         info!("No subcommand provided. RCam will now exit. In the future, this might start a default mode.");
-        // Potentially print help: cli::build_cli().print_help().unwrap_or_default();
     }
 
     info!("RCam operations finished.");

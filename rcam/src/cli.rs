@@ -48,5 +48,4 @@ pub fn build_cli() -> Command {
             Command::new("test")
                 .about("Runs a diagnostic test suite")
         )
-        // Potentially add 'discover' subcommand in the future
 } 

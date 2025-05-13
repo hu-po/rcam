@@ -79,25 +79,4 @@ fn validate_master_config(config: &MasterConfig) -> Result<(), AppError> {
         // rtsp_path_override is optional, so no check here unless we want to validate its format if present.
     }
     Ok(())
-}
-
-// Example validation function (to be expanded)
-#[allow(dead_code)]
-fn validate_config(config: &MasterConfig) -> Result<(), AppError> {
-    // Validate application settings
-    if config.app_settings.output_directory.is_empty() {
-        return Err(AppError::Config("Application output_directory cannot be empty.".to_string()));
-    }
-
-    // Validate each camera
-    for camera in &config.cameras {
-        if camera.name.is_empty() {
-            return Err(AppError::Config("Camera name cannot be empty.".to_string()));
-        }
-        if camera.ip.is_empty() { // A more robust IP validation is needed
-            return Err(AppError::Config(format!("IP address for camera '{}' cannot be empty.", camera.name)));
-        }
-        // TODO: Validate RTSP path, credentials presence (though not value here)
-    }
-    Ok(())
 } 

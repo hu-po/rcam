@@ -1,8 +1,8 @@
 use crate::config_loader::MasterConfig;
 use crate::core::camera_manager::{CameraManager, parse_camera_names_arg};
-use crate::camera::camera_media::CameraMediaManager; // MediaBackend import removed
+use crate::camera::camera_media::CameraMediaManager;
 use crate::errors::AppError;
-use crate::common::file_utils; // For generate_timestamped_filename
+use crate::common::file_utils;
 use clap::ArgMatches;
 use log::{info, error, warn};
 use std::path::PathBuf;
@@ -16,7 +16,7 @@ pub async fn handle_capture_image_cli(
 ) -> Result<(), AppError> {
     info!("Handling capture-image command...");
 
-    let media_manager = CameraMediaManager::new(); // Simplified instantiation
+    let media_manager = CameraMediaManager::new();
 
     let specific_cameras_arg = args.get_one::<String>("cameras");
     let camera_names_to_process = parse_camera_names_arg(specific_cameras_arg);
@@ -64,11 +64,6 @@ pub async fn handle_capture_image_cli(
             );
             let output_path = base_output_dir_clone.join(filename);
             
-            // Note: The delay is now handled inside capture_image method of CameraMediaManager
-            // However, if the user wants a global delay *before* any camera starts, the old logic was fine.
-            // For per-camera delay or more fine-grained control, it should be in CameraMediaManager.
-            // The current `delay` CLI arg is a global pre-delay. Let's adjust to pass it to capture_image.
-
             match media_manager_arc.capture_image(&mut *cam_entity, &app_config_clone, output_path.clone(), delay_option_clone).await {
                 Ok(path) => info!("Successfully captured image for '{}' to {}", cam_entity.config.name, path.display()),
                 Err(e) => error!("Failed to capture image for '{}': {}", cam_entity.config.name, e),

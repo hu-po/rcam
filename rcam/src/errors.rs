@@ -48,10 +48,3 @@ impl From<std::io::Error> for AppError {
         AppError::Io(err.to_string())
     }
 }
-
-// Potentially add more From implementations for common errors from libraries like reqwest, etc.
-// impl From<reqwest::Error> for AppError {
-//     fn from(err: reqwest::Error) -> Self {
-//         AppError::Network(err.to_string())
-//     }
-// } 

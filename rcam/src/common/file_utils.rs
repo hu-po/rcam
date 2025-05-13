@@ -33,16 +33,3 @@ pub fn ensure_output_directory(dir_path_str: &str) -> Result<PathBuf, AppError> 
     }
     Ok(dir_path)
 }
-
-// Future placeholder for file rotation logic (e.g., deleting oldest files to maintain storage limit)
-// pub fn manage_storage_retention(
-//     output_directory: &Path,
-//     max_storage_gb: u64, 
-//     camera_name: Option<&str> // If retention is per-camera
-// ) -> Result<(), AppError> {
-//     // 1. Calculate current storage used (for this camera or globally).
-//     // 2. List files sorted by creation/modification time.
-//     // 3. If over limit, delete oldest files until under limit.
-//     warn!("Storage retention management not yet implemented for directory: {}", output_directory.display());
-//     Ok(())
-// } 

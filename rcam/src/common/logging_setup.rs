@@ -27,25 +27,9 @@ pub fn initialize_logging(config: Option<&MasterConfig>, cli_matches: &clap::Arg
         }
     };
 
-    // Customize log format (optional) - example from before
-    // builder.format(|buf, record| {
-    //     use std::io::Write;
-    //     writeln!(
-    //         buf,
-    //         "{} [{}] - {}",
-    //         chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f"),
-    //         record.level(),
-    //         record.args()
-    //     )
-    // });
-
     builder.try_init().unwrap_or_else(|e| {
         eprintln!("Failed to initialize logger: {}. Logging might not work as expected.", e);
     });
-    // Note: We can't use log::info here before logger is fully confirmed to be working,
-    // or if try_init fails. The message below might not appear if init fails.
-    // Consider a simple println if robust startup message is needed even on logger fail.
-    // log::info!("Logging initialized with level: {}", log_level_str);
 }
 
 // A simpler init function if you don't want to pass full config and CLI matches around initially.

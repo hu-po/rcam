@@ -4,15 +4,11 @@ use crate::errors::AppError;
 use clap::ArgMatches;
 use log::{info, warn, error};
 use std::path::PathBuf;
-// use std::time::Duration; // Marked as unused
 
 // Import operation handlers
 use crate::camera::camera_media::CameraMediaManager; 
 use crate::common::file_utils;
-// use super::image_capture_op; // Refactored to call logic directly
-// use super::video_record_op; // Refactored to call logic directly
 use super::time_sync_op; // Still used
-// use super::camera_control_op; // Refactored to call logic directly
 use crate::camera::camera_controller::CameraController;
 
 struct DiagnosticResult {
@@ -62,11 +58,6 @@ pub async fn handle_diagnostic_cli(
         let cam_name = cam_arc.lock().await.config.name.clone();
         info!("DIAGNOSTIC: Running tests for camera: {}", cam_name);
 
-        // Create a temporary ArgMatches for single camera operations if needed,
-        // or adapt operation handlers to accept direct camera names/entities.
-        // For simplicity, we'll construct minimal ArgMatches for now.
-        // This is a bit of a hack; ideally, op handlers would also have non-CLI entry points.
-
         // 2. Test single image capture per camera
         let image_diag_output_dir = diagnostic_output_dir.join(&cam_name).join("image");
         std::fs::create_dir_all(&image_diag_output_dir).ok(); // Best effort
@@ -80,7 +71,6 @@ pub async fn handle_diagnostic_cli(
         let task_image_diag_output_dir = image_diag_output_dir.clone();
 
         // This part is now simplified to directly call the capture logic
-        // No need to construct ArgMatches for image capture test
         let image_capture_future = async move {
             let mut cam_entity = task_cam_entity_arc.lock().await;
             let filename = file_utils::generate_timestamped_filename(
@@ -155,8 +145,6 @@ pub async fn handle_diagnostic_cli(
             // Directly call camera control logic
             let control_future = async move {
                 let cam_entity = task_cam_entity_arc_ctrl.lock().await;
-                // The info messages are now inside this block, similar to the original op
-                // info!("Attempting to {} camera: '{}'", if action_bool {"enable"} else {"disable"}, cam_entity.config.name);
                 controller_clone_diag.set_camera_enabled(&*cam_entity, action_bool).await
             };
 
