@@ -3,8 +3,6 @@ name = "rcam"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive"] }
@@ -15,23 +13,8 @@ chrono = { version = "0.4", features = ["serde"] }
 log = "0.4"
 env_logger = "0.10"
 reqwest = { version = "0.11", features = ["json", "stream"] }
-# For ONVIF or direct camera HTTP Digest Auth if needed
-# reqwest_digest = "0.10" # Example, choose a suitable digest auth crate
-
-# GStreamer bindings (Primary choice for media handling as per gemini.md)
-# gstreamer = "0.20"
-# gstreamer-app = "0.20"
-# gstreamer-video = "0.20"
-# gstreamer-rtsp-server = "0.20" # If we need to re-stream or act as an RTSP server
-
-# OpenCV bindings (Alternative media handling, as per grok.md)
-opencv = { version = "0.84" }
-
-# Image crate for saving frames
+opencv = "0.94.4"
 image = "0.24"
-
-# ONVIF client library (Placeholder, research and choose a maintained one)
-# onvif_rs = "0.1" 
 
 [dev-dependencies]
 wiremock = "0.5" # For mocking HTTP services in tests 
