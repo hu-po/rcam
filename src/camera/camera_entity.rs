@@ -8,10 +8,6 @@ pub enum CameraState {
     Idle,
     Connecting,
     Connected,
-    Streaming,
-    Recording,
-    Error(String),
-    Disabled,
 }
 
 #[derive(Debug, Clone)]
@@ -70,9 +66,6 @@ impl CameraEntity {
                 };
                 Ok(format!("{}{}", base_url, path))
             } else {
-                // If no override, an error might be more appropriate now, or a very generic default.
-                // For now, let's assume an override is usually provided or a common known path exists.
-                // This path is an example and might not work for all cameras.
                 warn!("RTSP path override not set for camera '{}', using a generic default path. This might fail.", self.config.name);
                 Ok(format!("{}/cam/realmonitor?channel=1&subtype=0", base_url)) 
             }

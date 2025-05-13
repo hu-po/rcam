@@ -11,15 +11,12 @@ use opencv::{
     core as opencv_core
 };
 
-// MediaBackend enum removed
 
-#[derive(Clone)] // Added Clone for use in operations modules
-pub struct CameraMediaManager {
-    // No backend field needed if always OpenCV
-}
+#[derive(Clone)]
+pub struct CameraMediaManager { }
 
 impl CameraMediaManager {
-    pub fn new() -> Self { // No backend argument
+    pub fn new() -> Self {
         CameraMediaManager {}
     }
 
@@ -173,23 +170,23 @@ impl CameraMediaManager {
 
             let start_time = std::time::Instant::now();
             let mut frame_count = 0;
-            let mut last_error_log_time = std::time::Instant::now();
+            let mut _last_error_log_time = std::time::Instant::now();
 
             while start_time.elapsed() < duration {
                 let mut frame = opencv_core::Mat::default();
                 if !cap.read(&mut frame).map_err(|e| AppError::OpenCV(format!("Frame read error mid-stream for '{}': {}", cam_name, e)))? {
                     // Log this only periodically to avoid spamming if the stream is truly down.
-                    if last_error_log_time.elapsed().as_secs() > 5 {
+                    if _last_error_log_time.elapsed().as_secs() > 5 {
                         error!("Camera '{}': Failed to read frame or stream ended prematurely.", cam_name);
-                        last_error_log_time = std::time::Instant::now();
+                        _last_error_log_time = std::time::Instant::now();
                     }
                     // Decide if we should break or try to re-establish. For now, break.
                     break; 
                 }
                 if frame.empty() {
-                     if last_error_log_time.elapsed().as_secs() > 5 {
+                     if _last_error_log_time.elapsed().as_secs() > 5 {
                         warn!("Camera '{}': Captured empty frame mid-stream.", cam_name);
-                        last_error_log_time = std::time::Instant::now();
+                        _last_error_log_time = std::time::Instant::now();
                     }
                     continue; // Skip empty frame
                 }

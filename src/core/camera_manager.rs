@@ -27,12 +27,7 @@ impl CameraManager {
         info!("CameraManager initialized with {} cameras.", cameras.len());
         Ok(CameraManager {
             cameras,
-            // app_config: Arc::new(master_config.app_settings.clone()), // Assuming ApplicationConfig is Clone
         })
-    }
-
-    pub async fn get_camera(&self, name: &str) -> Option<Arc<Mutex<CameraEntity>>> {
-        self.cameras.get(name).cloned()
     }
 
     pub async fn get_all_cameras(&self) -> Vec<Arc<Mutex<CameraEntity>>> {
