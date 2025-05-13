@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use tokio::sync::Mutex;
 use std::sync::Arc;
 use chrono::Utc;
+use futures::future::join_all;
 
 
 #[derive(Clone)]
@@ -84,37 +85,54 @@ impl CameraMediaManager {
             return Ok(Vec::new());
         }
 
-        // 1. Get or initialize all captures
-        let mut capture_arcs = Vec::new();
-        let mut camera_names_ordered = Vec::new();
+        // 1. Get or initialize all captures (Parallelized)
+        let mut capture_init_futures = Vec::new();
+        let mut temp_camera_names_ordered = Vec::new(); // To keep order for matching results
+
         for (name, url) in cameras_info {
-            debug!("  Getting/initializing capture for image capture: {} ({})", name, url);
-            capture_arcs.push(self.get_or_init_capture(name, url).await
-                .with_context(|| format!("Failed to get/init capture for camera '{}' for image capture", name))?);
-            camera_names_ordered.push(name.clone());
+            debug!("  Queueing capture initialization for image capture: {} ({})", name, url);
+            temp_camera_names_ordered.push(name.clone());
+            capture_init_futures.push(self.get_or_init_capture(name, url));
         }
 
-        // 2. Prepare output paths
-        let mut output_paths = Vec::new();
+        info!("  Initializing {} camera stream(s) for image capture concurrently...", capture_init_futures.len());
+        let init_results = join_all(capture_init_futures).await;
+        info!("  All camera stream initialization attempts for image capture completed.");
+
+        let mut capture_arcs = Vec::new();
+        let mut camera_names_ordered = Vec::new(); // For successfully initialized cameras
+
+        for (i, result) in init_results.into_iter().enumerate() {
+            let cam_name = &temp_camera_names_ordered[i];
+            match result {
+                Ok(cap_arc) => {
+                    debug!("Successfully initialized capture for '{}' for image capture.", cam_name);
+                    capture_arcs.push(cap_arc);
+                    camera_names_ordered.push(cam_name.clone());
+                }
+                Err(e) => {
+                    error!("Failed to get/init capture for camera '{}' for image capture: {:#}. Skipping this camera.", cam_name, e);
+                }
+            }
+        }
+
+        if capture_arcs.is_empty() {
+            warn!("��️ No camera streams could be initialized for image capture. Aborting.");
+            return Ok(Vec::new());
+        }
+        info!("Successfully initialized {} out of {} camera streams for image capture.", capture_arcs.len(), cameras_info.len());
+
+        // 2. Prepare output directory (output_paths will be generated inside spawn_blocking)
         if !output_dir.exists() {
             debug!("Creating output directory for images: {}", output_dir.display());
             std::fs::create_dir_all(&output_dir)
                 .with_context(|| format!("Failed to create output directory for images: {}", output_dir.display()))?;
         }
-
-        for name in &camera_names_ordered {
-            let filename = crate::common::file_utils::generate_timestamped_filename(
-                name,
-                &app_config.filename_timestamp_format,
-                &app_config.image_format
-            );
-            output_paths.push(output_dir.join(filename));
-        }
         
         let app_config_clone = app_config.clone();
-        let output_paths_clone = output_paths.clone();
 
         // 3. Spawn blocking task for capture
+        let output_dir_clone = output_dir.clone(); // Clone for spawn_blocking
         let task_future = tokio::task::spawn_blocking(move || -> Result<Vec<PathBuf>> {
             let blocking_code_start_time = std::time::Instant::now();
             info!("🖼️ OpenCV (blocking): Starting image capture task for {} cameras.", capture_arcs.len());
@@ -130,19 +148,18 @@ impl CameraMediaManager {
             debug!("  OpenCV (blocking): All {} captures locked.", locked_caps.len());
 
             let mut saved_image_paths: Vec<PathBuf> = Vec::new();
+            let mut frame = opencv_core::Mat::default(); // Define frame outside the loop
 
             for (i, mut cap_guard) in locked_caps.into_iter().enumerate() {
                 let cam_name = &camera_names_ordered[i];
-                let output_path = &output_paths_clone[i];
-                debug!("  OpenCV (blocking): Capturing image for '{}' to {}", cam_name, output_path.display());
-
-                let mut frame = opencv_core::Mat::default();
+                debug!("  OpenCV (blocking): Preparing to capture image for '{}'", cam_name);
+                
                 let frame_read_start = std::time::Instant::now();
-
                 if !cap_guard.read(&mut frame).map_err(|e| anyhow!(e).context(format!("OpenCV: Failed to read frame from '{}' for capture", cam_name)))? {
                     error!("❌ OpenCV (blocking): Failed to read frame for '{}'. Skipping this camera.", cam_name);
                     continue;
                 }
+                // let frame_read_timestamp = std::time::Instant::now(); // Or use chrono for wall clock. Using Instant for debug, filename uses chrono.
                 debug!("  OpenCV (blocking): Frame read for '{}' in {:?}", cam_name, frame_read_start.elapsed());
 
                 if frame.empty() {
@@ -150,6 +167,20 @@ impl CameraMediaManager {
                     continue;
                 }
                 info!("🖼️ OpenCV (blocking): Frame read successfully for '{}' (size: {}x{})", cam_name, frame.cols(), frame.rows());
+
+                // ---- Generate timestamp AFTER successful read ----
+                // Using crate::common::timestamp_utils::current_local_timestamp_str as per conceptual change.
+                // Ensure this utility function exists and is accessible.
+                // If not, replace with:
+                // let current_capture_timestamp_str = chrono::Local::now().format(&app_config_clone.filename_timestamp_format).to_string();
+                let current_capture_timestamp_str = crate::common::timestamp_utils::current_local_timestamp_str(
+                    &app_config_clone.filename_timestamp_format
+                );
+                let filename = format!("{}_{}.{}", cam_name, current_capture_timestamp_str, app_config_clone.image_format);
+                let output_path = output_dir_clone.join(&filename);
+                // ---- End timestamp generation ----
+
+                debug!("  OpenCV (blocking): Saving frame for '{}' to {} (timestamp: {})", cam_name, output_path.display(), current_capture_timestamp_str);
 
                 if let Some(parent_dir) = output_path.parent() {
                     if !parent_dir.exists() {
@@ -220,14 +251,42 @@ impl CameraMediaManager {
             return Ok(Vec::new());
         }
 
-        let mut capture_arcs = Vec::new();
-        let mut camera_names_ordered = Vec::new();
+        // Parallelize capture initialization
+        let mut capture_init_futures = Vec::new();
+        let mut temp_camera_names_ordered = Vec::new(); // To keep order for matching results
+
         for (name, url) in cameras_info {
-            debug!("  Getting/initializing capture for recording: {} ({})", name, url);
-            capture_arcs.push(self.get_or_init_capture(name, url).await
-                .with_context(|| format!("Failed to get/init capture for camera '{}' for recording", name))?);
-            camera_names_ordered.push(name.clone());
+            debug!("  Queueing capture initialization for recording: {} ({})", name, url);
+            temp_camera_names_ordered.push(name.clone());
+            capture_init_futures.push(self.get_or_init_capture(name, url));
         }
+
+        info!("  Initializing {} camera stream(s) for video recording concurrently...", capture_init_futures.len());
+        let init_results = join_all(capture_init_futures).await;
+        info!("  All camera stream initialization attempts for video recording completed.");
+
+        let mut capture_arcs = Vec::new();
+        let mut camera_names_ordered = Vec::new(); // For successfully initialized cameras
+
+        for (i, result) in init_results.into_iter().enumerate() {
+            let cam_name = &temp_camera_names_ordered[i];
+            match result {
+                Ok(cap_arc) => {
+                    debug!("Successfully initialized capture for '{}' for video recording.", cam_name);
+                    capture_arcs.push(cap_arc);
+                    camera_names_ordered.push(cam_name.clone());
+                }
+                Err(e) => {
+                    error!("Failed to get/init capture for camera '{}' for video recording: {:#}. Skipping this camera.", cam_name, e);
+                }
+            }
+        }
+
+        if capture_arcs.is_empty() {
+            warn!("🎬 No camera streams could be initialized for video recording. Aborting.");
+            return Ok(Vec::new());
+        }
+        info!("Successfully initialized {} out of {} camera streams for video recording.", capture_arcs.len(), cameras_info.len());
 
         let mut output_paths = Vec::new();
         if !output_dir.exists() {
