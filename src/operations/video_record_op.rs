@@ -7,7 +7,7 @@ use clap::ArgMatches;
 use log::{info, error, debug, warn};
 use std::time::{Duration, Instant};
 use rerun::RecordingStreamBuilder;
-use rerun::datatypes::{TensorData, TensorDimension, TensorBuffer, ColorModel};
+use rerun::datatypes::{TensorData, TensorBuffer, ColorModel};
 use rerun::archetypes::Image as RerunImage;
 use opencv::prelude::*;
 use opencv::{videoio, imgproc, core as opencv_core};
@@ -76,7 +76,7 @@ pub async fn handle_record_video_cli(
         return Err(anyhow::anyhow!("Failed to retrieve any usable RTSP URLs for video recording"));
     }
 
-    let camera_name_to_index: std::collections::HashMap<String, usize> = cameras_info
+    let _camera_name_to_index: std::collections::HashMap<String, usize> = cameras_info
         .iter()
         .enumerate()
         .map(|(idx, (name, _))| (name.clone(), idx))
@@ -150,9 +150,9 @@ pub async fn handle_record_video_cli(
                                 }
 
                                 let mut frame_idx = 0i64;
-                                let mut BGR_frame = opencv_core::Mat::default();
+                                let mut bgr_frame = opencv_core::Mat::default();
                                 
-                                while match cap.read(&mut BGR_frame) {
+                                while match cap.read(&mut bgr_frame) {
                                     Ok(true) => true,
                                     Ok(false) => {
                                         debug!("Rerun: End of video stream {} or cannot read frame.", video_path.display());
@@ -163,67 +163,60 @@ pub async fn handle_record_video_cli(
                                         false
                                     }
                                 } {
-                                    if BGR_frame.empty() {
+                                    if bgr_frame.empty() {
                                         warn!("Rerun: Read empty frame from {}. Skipping.", video_path.display());
                                         continue;
                                     }
 
-                                    if let Some(rec_stream) = &rec_stream_opt {
-                                        rec_stream.set_time_sequence("frame_number", frame_idx);
-                                        rec_stream.set_duration_secs("video_time", op_start_time.elapsed().as_secs_f64());
+                                    rec_stream.set_time_sequence("frame_number", frame_idx);
+                                    rec_stream.set_duration_secs("video_time", op_start_time.elapsed().as_secs_f64());
 
-                                        let mut rgb_frame = opencv_core::Mat::default();
-                                        if let Err(e) = imgproc::cvt_color(&BGR_frame, &mut rgb_frame, imgproc::COLOR_BGR2RGB, 0) {
-                                            error!("Rerun: Failed to convert frame to RGB for {}: {}. Skipping frame.", video_path.display(), e);
-                                            frame_idx += 1;
-                                            continue;
-                                        }
+                                    let mut rgb_frame = opencv_core::Mat::default();
+                                    if let Err(e) = imgproc::cvt_color(&bgr_frame, &mut rgb_frame, imgproc::COLOR_BGR2RGB, 0) {
+                                        error!("Rerun: Failed to convert frame to RGB for {}: {}. Skipping frame.", video_path.display(), e);
+                                        frame_idx += 1;
+                                        continue;
+                                    }
 
-                                        match rgb_frame.data_bytes() {
-                                            Ok(data) => {
-                                                let rows = rgb_frame.rows() as u64;
-                                                let cols = rgb_frame.cols() as u64;
-                                                let channels = rgb_frame.channels() as u64;
+                                    match rgb_frame.data_bytes() {
+                                        Ok(data) => {
+                                            let rows = rgb_frame.rows() as u64;
+                                            let cols = rgb_frame.cols() as u64;
+                                            let channels = rgb_frame.channels() as u64;
 
-                                                let shape = vec![
-                                                    TensorDimension { size: rows, name: Some("height".to_string()) },
-                                                    TensorDimension { size: cols, name: Some("width".to_string()) },
-                                                    TensorDimension { size: channels, name: Some("channel".to_string()) },
-                                                ];
+                                            let dimension_sizes = vec![rows, cols, channels];
 
-                                                let tensor_data = TensorData {
-                                                    shape,
-                                                    buffer: TensorBuffer::U8(data.to_vec().into()),
-                                                    names: None,
-                                                };
-                                                
-                                                match RerunImage::from_color_model_and_tensor(ColorModel::RGB, tensor_data.clone()) {
-                                                    Ok(rerun_image_archetype) => {
-                                                        if let Err(e) = rec_stream.log(&*entity_path_str, &rerun_image_archetype) {
-                                                            error!(
-                                                                "Rerun: Failed to log frame {} from {} to Rerun: {}",
-                                                                frame_idx, video_path.display(), e
-                                                            );
-                                                        } else {
-                                                            if frame_idx % 100 == 0 {
-                                                                debug!("Rerun: Logged frame {} for {} to {}", frame_idx, video_path.display(), entity_path_str);
-                                                            }
-                                                        }
-                                                    }
-                                                    Err(e) => {
+                                            let tensor_data = TensorData::new(
+                                                dimension_sizes,
+                                                TensorBuffer::U8(data.to_vec().into())
+                                            );
+                                            
+                                            match RerunImage::from_color_model_and_tensor(ColorModel::RGB, tensor_data.clone()) {
+                                                Ok(rerun_image_archetype) => {
+                                                    if let Err(e) = rec_stream.log(&*entity_path_str, &rerun_image_archetype) {
                                                         error!(
-                                                            "Rerun: Failed to create Rerun image for frame {} from {}: {:?}",
+                                                            "Rerun: Failed to log frame {} from {} to Rerun: {}",
                                                             frame_idx, video_path.display(), e
                                                         );
+                                                    } else {
+                                                        if frame_idx % 100 == 0 {
+                                                            debug!("Rerun: Logged frame {} for {} to {}", frame_idx, video_path.display(), entity_path_str);
+                                                        }
                                                     }
                                                 }
+                                                Err(e) => {
+                                                    error!(
+                                                        "Rerun: Failed to create Rerun image for frame {} from {}: {:?}",
+                                                        frame_idx, video_path.display(), e
+                                                    );
+                                                }
                                             }
-                                            Err(e) => {
-                                                error!(
-                                                    "Rerun: Failed to get data_bytes for frame {} from {}: {}. Skipping frame.",
-                                                    frame_idx, video_path.display(), e
-                                                );
-                                            }
+                                        }
+                                        Err(e) => {
+                                            error!(
+                                                "Rerun: Failed to get data_bytes for frame {} from {}: {}. Skipping frame.",
+                                                frame_idx, video_path.display(), e
+                                            );
                                         }
                                     }
                                     frame_idx += 1;

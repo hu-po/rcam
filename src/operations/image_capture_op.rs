@@ -7,7 +7,7 @@ use clap::ArgMatches;
 use log::{info, error, debug, warn};
 use std::time::Instant;
 use rerun::RecordingStreamBuilder;
-use rerun::datatypes::{TensorData, TensorDimension, TensorBuffer, ColorModel};
+use rerun::datatypes::{TensorData, TensorBuffer, ColorModel};
 use rerun::archetypes::Image as RerunImage;
 use image;
 
@@ -89,7 +89,7 @@ pub async fn handle_capture_image_cli(
         output_dir.display()
     );
 
-    let camera_name_to_index: std::collections::HashMap<String, usize> = cameras_info
+    let _camera_name_to_index: std::collections::HashMap<String, usize> = cameras_info
         .iter()
         .enumerate()
         .map(|(idx, (name, _))| (name.clone(), idx))
@@ -103,7 +103,7 @@ pub async fn handle_capture_image_cli(
         )
         .await
     {
-        Ok(mut paths) => {
+        Ok(paths) => {
             if paths.is_empty() && !cameras_info.is_empty() {
                 warn!(
                     "🖼️ Image capture completed but no files were produced. This might indicate an issue during capture for all cameras."
@@ -141,37 +141,28 @@ pub async fn handle_capture_image_cli(
                         match image::load_from_memory(&std::fs::read(path)?) {
                             Ok(dynamic_image) => {
                                 let img_rgb8 = dynamic_image.to_rgb8();
-                                info!("Image for {} loaded and converted to RGB8", entity_path_str);
+                                
+                                let log_cam_name = camera_name_opt.unwrap_or("unknown_camera");
+                                
+                                rec_stream.set_duration_secs("capture_time", op_start_time.elapsed().as_secs_f64());
 
-                                if let Some(rec_stream) = &rec_stream_opt {
-                                    let log_cam_name = camera_name_opt.unwrap_or("unknown_camera");
-                                    let entity_path_str = format!("camera/{}/image", log_cam_name);
-                                    
-                                    rec_stream.set_duration_secs("capture_time", op_start_time.elapsed().as_secs_f64());
+                                let (width, height) = img_rgb8.dimensions();
+                                
+                                let dimension_sizes = vec![height as u64, width as u64, 3_u64];
+                                
+                                let tensor_data = TensorData::new(
+                                    dimension_sizes, 
+                                    TensorBuffer::U8(img_rgb8.into_raw().into())
+                                );
 
-                                    let (width, height) = img_rgb8.dimensions();
-                                    
-                                    let shape = vec![
-                                        TensorDimension { size: height as u64, name: Some("height".to_string()) },
-                                        TensorDimension { size: width as u64, name: Some("width".to_string()) },
-                                        TensorDimension { size: 3, name: Some("color".to_string()) },
-                                    ];
-                                    
-                                    let tensor_data = TensorData {
-                                        shape,
-                                        buffer: TensorBuffer::U8(img_rgb8.into_raw().into()),
-                                        names: None,
-                                    };
-
-                                    match RerunImage::from_color_model_and_tensor(ColorModel::RGB, tensor_data.clone()) {
-                                        Ok(rerun_image_archetype) => {
-                                            if let Err(e) = rec_stream.log(&*entity_path_str, &rerun_image_archetype) {
-                                                error!("Failed to log image to Rerun for {}: {}", log_cam_name, e);
-                                            }
+                                match RerunImage::from_color_model_and_tensor(ColorModel::RGB, tensor_data.clone()) {
+                                    Ok(rerun_image_archetype) => {
+                                        if let Err(e) = rec_stream.log(&*entity_path_str, &rerun_image_archetype) {
+                                            error!("Failed to log image to Rerun for {}: {}", log_cam_name, e);
                                         }
-                                        Err(e) => {
-                                            error!("Failed to create Rerun image for {} using from_color_model_and_tensor: {:?}", log_cam_name, e);
-                                        }
+                                    }
+                                    Err(e) => {
+                                        error!("Failed to create Rerun image for {} using from_color_model_and_tensor: {:?}", log_cam_name, e);
                                     }
                                 }
                             }
