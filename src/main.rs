@@ -66,9 +66,6 @@ async fn main() -> Result<()> {
             "verify-times" => {
                 operations::time_sync_op::handle_verify_times_cli(&master_config, &camera_manager).await
             }
-            "control" => {
-                operations::camera_control_op::handle_control_camera_cli(&master_config, &camera_manager, subcommand_matches.1).await
-            }
             "test" => {
                 operations::diagnostic_op::handle_diagnostic_cli(&master_config, &camera_manager, subcommand_matches.1).await
             }

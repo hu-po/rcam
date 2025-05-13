@@ -12,8 +12,7 @@ application:
   time_sync_tolerance_seconds: 5.0 # Tolerance for verify-time command (float)
   log_level: "info" # e.g., "error", "warn", "info", "debug", "trace"
   cgi_time_path: "/cgi-bin/global.cgi?action=getCurrentTime"
-  cgi_control_enable_path: "/cgi-bin/configManager.cgi?action=setConfig&VideoInOptions[0].Enable=1"
-  cgi_control_disable_path: "/cgi-bin/configManager.cgi?action=setConfig&VideoInOptions[0].Enable=0"
+  rerun_flush_timeout_secs: 10.0 # Rerun SDK flush timeout in seconds (float)
 
 cameras:
   - name: "camera1"

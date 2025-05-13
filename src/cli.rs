@@ -45,12 +45,6 @@ pub fn build_cli() -> Command {
                 .about("Verifies time synchronization across all cameras")
         )
         .subcommand(
-            Command::new("control")
-                .about("Controls camera functionalities")
-                .arg(Arg::new("action").long("action").value_name("ACTION").required(true).help("Action to perform: 'enable' or 'disable'").action(ArgAction::Set))
-                .arg(Arg::new("cameras").long("cameras").value_name("CAM_NAMES").help("Comma-separated list of camera names to control (default: all)").action(ArgAction::Set))
-        )
-        .subcommand(
             Command::new("test")
                 .about("Runs a diagnostic test suite")
         );

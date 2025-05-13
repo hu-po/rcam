@@ -71,10 +71,6 @@ Implement get_camera_time function using ONVIF (preferred) or specific HTTP CGI 
 
 Implement verify-all-times command to check sync across all cameras within tolerance.
 
-Stream Toggle:
-
-Implement enable-camera/disable-camera commands (for single or all cameras) using ONVIF (preferred) or specific HTTP CGI endpoint (fallback). Requires HTTP Digest Authentication for CGI.
-
 3.3. Media Capture
 RTSP Connection: Connect to camera RTSP streams concurrently using the determined URIs and transport preference.
 
@@ -212,8 +208,6 @@ Initialization: Parse CLI args -> Load/Validate Config -> Setup Logging -> Initi
 Capture All Images: Manager spawns an async_capture_image task for each camera -> Each task sets up a short-lived GStreamer pipeline (rtspsrc ! ... ! appsink) -> Grabs one buffer -> Saves using image crate -> Task completes -> join_all waits.
 
 Record All Videos: Manager spawns an async_record_video task for each camera -> Each task sets up a GStreamer pipeline (rtspsrc ! ... ! encoder ! muxer ! filesink) -> Pipeline runs for specified duration (managed via GStreamer messages/timers or a separate tokio::time::sleep) -> Pipeline state is changed to stop recording -> Task completes -> join_all waits.
-
-Control Command: Manager spawns an async_control_camera task for each specified camera -> Task uses camera::control module (ONVIF/HTTP) -> Task completes -> join_all waits.
 
 6. Future Considerations
 Support for more complex GStreamer pipelines defined in config.

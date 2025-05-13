@@ -9,7 +9,6 @@ use std::time::Instant;
 // Import operation handlers
 use crate::camera::camera_media::CameraMediaManager; 
 use super::time_sync_op;
-use crate::camera::camera_controller::CameraController;
 
 struct DiagnosticResult {
     test_name: String,
@@ -196,46 +195,6 @@ pub async fn handle_diagnostic_cli(
             },
         }
 
-        // 4. Test enable/disable stream (will likely show warnings/errors)
-        let ctrl_test_init_start = Instant::now();
-        let camera_controller_diag = CameraController::new();
-        debug!("  CameraController for diag control test on '{}' initialized in {:?}.", cam_name, ctrl_test_init_start.elapsed());
-
-        for action_bool in [true, false] { // Test both enable (true) and disable (false)
-            let action_str = if action_bool { "enable" } else { "disable" };
-            let action_emoji = if action_bool { "💡" } else { "🔌" };
-            info!("    DIAGNOSTIC [{}]: Running control action: {} {}...", cam_name, action_str, action_emoji);
-            let ctrl_action_start = Instant::now();
-            
-            let task_cam_entity_arc_ctrl = cam_arc.clone();
-            let controller_clone_diag = camera_controller_diag.clone();
-            let app_settings_clone_diag = master_config.app_settings.clone();
-
-            let control_future = async move {
-                let cam_entity = task_cam_entity_arc_ctrl.lock().await;
-                controller_clone_diag.set_camera_enabled(&*cam_entity, &app_settings_clone_diag, action_bool).await
-            };
-
-            match control_future.await {
-                Ok(()) => {
-                    info!("    DIAGNOSTIC [{}]: Control Action '{}' COMPLETED in {:?}. Check logs for camera response.", cam_name, action_str, ctrl_action_start.elapsed());
-                    results.push(DiagnosticResult {
-                        test_name: format!("Control Action ('{}': {})", cam_name, action_str),
-                        success: true, 
-                        details: "Completed. Check logs for camera response.".to_string(),
-                    });
-                },
-                Err(e) => {
-                    // This might be an expected error if the camera CGI doesn't return a typical success code, or if not supported
-                    warn!("    DIAGNOSTIC [{}]: Control Action '{}' resulted in an error/warning in {:?}: {:#}. This may be expected for some cameras.", cam_name, action_str, ctrl_action_start.elapsed(), e);
-                    results.push(DiagnosticResult {
-                        test_name: format!("Control Action ('{}': {})", cam_name, action_str),
-                        success: true, // Mark as success as the test itself ran, but warn about the outcome.
-                        details: format!("Completed with error/warning (may be expected): {:#}", e),
-                    });
-                },
-            }
-        }
         info!("  DIAGNOSTIC [{}]: Finished all tests for this camera.", cam_name);
     }
 

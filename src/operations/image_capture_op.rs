@@ -23,9 +23,13 @@ pub async fn handle_capture_image_cli(
     let mut rec_stream_opt: Option<rerun::RecordingStream> = None;
 
     if enable_rerun {
-        match RecordingStreamBuilder::new("rcam_image_capture").spawn() {
+        let flush_timeout_secs = master_config.app_settings.rerun_flush_timeout_secs.unwrap_or(10.0);
+
+        match RecordingStreamBuilder::new("rcam_image_capture")
+            .spawn_opts(&rerun::SpawnOptions::default(), Some(std::time::Duration::from_secs_f32(flush_timeout_secs)))
+        {
             Ok(stream) => {
-                info!("Rerun recording stream initialized and viewer spawned.");
+                info!("Rerun recording stream initialized and viewer spawned (FlushTimeout: {}s).", flush_timeout_secs);
                 rec_stream_opt = Some(stream);
             }
             Err(e) => {
@@ -171,6 +175,10 @@ pub async fn handle_capture_image_cli(
                             }
                         }
                     }
+                    // After the loop, explicitly flush the Rerun stream.
+                    info!("Rerun: Attempting to flush all logged data...");
+                    rec_stream.flush_blocking();
+                    info!("Rerun: Flush completed.");
                 }
             }
             info!("🖼️ All image capture operations completed in {:?}.", op_start_time.elapsed());

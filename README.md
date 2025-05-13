@@ -92,18 +92,6 @@ Verifies time synchronization across all configured cameras.
 rcam verify-times
 ```
 
-### `control` 🕹️
-Controls camera functionalities like enabling or disabling them.
-
-- Disable `cam1`:
-  ```bash
-  rcam control --action disable --cameras cam1
-  ```
-- Enable all cameras:
-  ```bash
-  rcam control --action enable
-  ```
-
 ### `test` 🩺
 Runs a diagnostic test suite.
 ```bash
@@ -118,13 +106,7 @@ To enable Rerun logging, use the `--rerun` flag with the `capture-image` or `cap
 
 **Installing the Rerun Viewer:**
 
-The Rerun SDK for Rust (which `rcam` uses) typically requires a separate installation of the Rerun viewer binary. You can install it using pip (if you have Python installed) or cargo:
-
-- Using pip:
-  ```bash
-  pip install rerun-sdk
-  ```
-  (This installs both the Python SDK and the `rerun` viewer binary)
+The Rerun SDK for Rust (which `rcam` uses) typically requires a separate installation of the Rerun viewer binary
 
 - Using cargo:
   ```bash
