@@ -1,0 +1,32 @@
+use serde::Deserialize;
+
+#[derive(Debug, Deserialize)]
+pub struct ApplicationConfig {
+    pub output_directory: String,
+    pub image_format: String, // e.g., "jpg", "png"
+    pub video_format: String, // Container, e.g., "mp4", "mkv"
+    pub video_codec: String,  // e.g., "h264", "mjpeg", "copy"
+    pub video_fps: f32,
+    pub video_duration_default_seconds: u32,
+    pub filename_timestamp_format: String, // strftime format string
+    pub rtsp_transport: String, // "tcp" or "udp"
+    pub time_sync_tolerance_seconds: f32,
+    pub log_level: Option<String>, // Making it optional to potentially use CLI or env var as primary
+}
+
+impl Default for ApplicationConfig {
+    fn default() -> Self {
+        ApplicationConfig {
+            output_directory: "./output".to_string(),
+            image_format: "jpg".to_string(),
+            video_format: "mp4".to_string(),
+            video_codec: "copy".to_string(),
+            video_fps: 25.0,
+            video_duration_default_seconds: 300,
+            filename_timestamp_format: "%Yy%mm%dd%Hh%Mm%Ss".to_string(),
+            rtsp_transport: "tcp".to_string(),
+            time_sync_tolerance_seconds: 5.0,
+            log_level: Some("info".to_string()),
+        }
+    }
+} 

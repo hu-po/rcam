@@ -1,0 +1,29 @@
+# RCam Default Configuration
+
+application:
+  output_directory: "./output" # Default directory for saving images and videos
+  image_format: "jpg" # e.g., "jpg", "png"
+  video_format: "mp4" # Container, e.g., "mp4", "mkv"
+  video_codec: "copy" # e.g., "h264", "mjpeg", "copy" (to copy stream directly if supported)
+  video_fps: 25.0 # Target recording FPS (float)
+  video_duration_default_seconds: 300 # Default recording duration in seconds (integer)
+  filename_timestamp_format: "%Yy%mm%dd%Hh%Mm%Ss" # strftime format string for filenames
+  rtsp_transport: "tcp" # Preferred RTSP transport ("tcp" or "udp") - May be handled by OpenCV internally
+  time_sync_tolerance_seconds: 5.0 # Tolerance for verify-time command (float)
+  log_level: "info" # e.g., "error", "warn", "info", "debug", "trace"
+
+cameras:
+  - name: "Cam1_LivingRoom"
+    ip: "192.168.1.101"
+    username: "admin"
+    # Password should be set via environment variable: CAM1_LIVINGROOM_PASSWORD
+    # mac_address: "AA:BB:CC:DD:EE:FF" # Optional
+    rtsp_path_override: "/cam/realmonitor?channel=1&subtype=0" # Optional, full RTSP path
+
+  - name: "Cam2_Backyard"
+    ip: "192.168.1.102"
+    username: "user123"
+    # Password should be set via environment variable: CAM2_BACKYARD_PASSWORD
+    # rtsp_path_override: "/stream1" # This line can be uncommented if needed for this camera
+
+# Add more cameras as needed 
