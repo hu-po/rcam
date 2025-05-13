@@ -2,10 +2,12 @@ use env_logger::Builder;
 use log::LevelFilter;
 use crate::config_loader::MasterConfig;
 use anyhow::{Context, Result};
-// We might not need cli::build_cli() here if we pass matches directly
 
 pub fn initialize_logging(config: Option<&MasterConfig>, cli_matches: &clap::ArgMatches) -> Result<()> {
     let mut builder = Builder::new();
+
+    // Configure logger to include timestamps
+    builder.format_timestamp_micros();
 
     // Determine log level from CLI, then config, then default
     let log_level_str = if cli_matches.get_flag("debug") {

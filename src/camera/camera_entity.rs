@@ -1,7 +1,10 @@
 use crate::camera_config::CameraConfig;
 use anyhow::{Result, bail};
 use std::env;
-use log::{info, warn};
+use log::{info, warn, debug};
+use std::time::Instant;
+use std::sync::{Arc, Mutex};
+use opencv::core::Mat;
 
 #[derive(Debug, Clone)]
 pub enum CameraState {
@@ -10,46 +13,67 @@ pub enum CameraState {
     Connected,
 }
 
+#[derive(Debug, Default, Clone)]
+pub struct CameraStats {
+    // Define fields for stats if any, e.g., frames_processed: u64,
+}
+
 #[derive(Debug, Clone)]
 pub struct CameraEntity {
     pub config: CameraConfig,
-    pub state: CameraState,
+    pub state: Arc<Mutex<CameraState>>,
+    pub last_image: Arc<Mutex<Option<Mat>>>,
+    stats: Arc<Mutex<CameraStats>>,
     password: Option<String>,
 }
 
 impl CameraEntity {
     pub fn new(config: CameraConfig) -> Self {
-        let mut entity = CameraEntity {
-            config,
-            state: CameraState::Idle,
+        let start_time = Instant::now();
+        debug!("Attempting to create CameraEntity for '{}'", config.name);
+        let mut entity = Self {
+            config: config.clone(),
+            state: Arc::new(Mutex::new(CameraState::Idle)),
+            last_image: Arc::new(Mutex::new(None)),
+            stats: Arc::new(Mutex::new(CameraStats::default())),
             password: None,
         };
         entity.load_password();
+        debug!("✅ CameraEntity for '{}' created in {:?}", entity.config.name, start_time.elapsed());
         entity
     }
 
     fn load_password(&mut self) {
         let env_var_name = format!("{}_PASSWORD", self.config.name.to_uppercase().replace("-", "_"));
+        debug!("🔑 Attempting to load password for camera \'{}\' from env var: {}", self.config.name, env_var_name);
+        let start_time = Instant::now();
         match env::var(&env_var_name) {
-            Ok(pass) => self.password = Some(pass),
+            Ok(pass) => {
+                self.password = Some(pass);
+                debug!("  Password loaded successfully for \'{}\' in {:?}.", self.config.name, start_time.elapsed());
+            },
             Err(_) => warn!(
-                "Password not found in environment variable '{}' for camera '{}'",
+                "⚠️ Password not found in environment variable \'{}\' for camera \'{}\' (lookup took {:?})",
                 env_var_name,
-                self.config.name
+                self.config.name,
+                start_time.elapsed()
             ),
         }
     }
 
     pub fn get_password(&self) -> Option<&str> {
+        debug!("🔑 Requesting password for camera: {}", self.config.name);
         self.password.as_deref()
     }
 
     pub fn update_state(&mut self, new_state: CameraState) {
-        info!("Camera '{}' state changed from {:?} to {:?}", self.config.name, self.state, new_state);
-        self.state = new_state;
+        info!("🔄 Camera \'{}\' state changed from {:?} to {:?} ✨", self.config.name, self.state.lock().unwrap().clone(), new_state);
+        *self.state.lock().unwrap() = new_state;
     }
 
     pub fn get_rtsp_url(&self) -> Result<String> {
+        debug!("🔗 Generating RTSP URL for camera: {}", self.config.name);
+        let start_time = Instant::now();
         if let Some(pass) = self.get_password() {
             let base_url = format!(
                 "rtsp://{}:{}@{}",
@@ -64,20 +88,39 @@ impl CameraEntity {
                 } else {
                     format!("/{}", override_path.trim_start_matches('/').trim())
                 };
-                Ok(format!("{}{}", base_url, path))
+                let url = format!("{}{}", base_url, path);
+                debug!("  Generated RTSP URL with override: \'{}\' in {:?}", url, start_time.elapsed());
+                Ok(url)
             } else {
                 warn!(
-                    "RTSP path override not set for camera '{}', using a generic default path. This might fail.", 
+                    "⚠️ RTSP path override not set for camera \'{}\', using a generic default path. This might fail.", 
                     self.config.name
                 );
-                Ok(format!("{}/cam/realmonitor?channel=1&subtype=0", base_url)) 
+                let url = format!("{}/cam/realmonitor?channel=1&subtype=0", base_url);
+                debug!("  Generated RTSP URL with default path: \'{}\' in {:?}", url, start_time.elapsed());
+                Ok(url)
             }
         } else {
             bail!(
-                "Password not available for RTSP URL construction for camera '{}'. Ensure '{}_PASSWORD' env var is set.", 
+                "❌ Password not available for RTSP URL construction for camera \'{}\'. Ensure \'{}\' env var is set.", 
                 self.config.name, 
                 self.config.name.to_uppercase().replace("-", "_")
             );
         }
+    }
+
+    pub async fn update_config(&self, new_config: CameraConfig) {
+        // ... existing code ...
+        let start_time = Instant::now();
+        debug!("Creating CameraEntity for '{}'", new_config.name);
+        let entity = Self {
+            config: new_config.clone(),
+            state: Arc::new(Mutex::new(CameraState::Idle)),
+            last_image: Arc::new(Mutex::new(None)),
+            stats: Arc::new(Mutex::new(CameraStats::default())),
+            password: None,
+        };
+        // Now log using the cloned config.name from the entity
+        debug!("✅ CameraEntity for '{}' created in {:?}", entity.config.name, start_time.elapsed());
     }
 } 

@@ -1,7 +1,11 @@
 use clap::{Arg, Command, ArgAction};
+use log::debug;
+use std::time::Instant;
 
 pub fn build_cli() -> Command {
-    Command::new("rcam")
+    debug!("⚙️ Building CLI interface...");
+    let start_time = Instant::now();
+    let cmd = Command::new("rcam")
         .version("0.1.0")
         .author("RCam Developers")
         .about("A Rust application for recording images and videos from multiple IP cameras.")
@@ -47,5 +51,7 @@ pub fn build_cli() -> Command {
         .subcommand(
             Command::new("test")
                 .about("Runs a diagnostic test suite")
-        )
+        );
+    debug!("✅ CLI interface built in {:?}", start_time.elapsed());
+    cmd
 } 

@@ -5,23 +5,30 @@ use anyhow::Result;
 use crate::common::file_utils;
 use crate::operations::op_helper::run_generic_camera_op;
 use clap::ArgMatches;
-use log::{info, error};
+use log::{info, error, debug};
 use std::time::Duration;
+use std::time::Instant;
 
 pub async fn handle_record_video_cli(
     master_config: &MasterConfig,
     camera_manager: &CameraManager,
     args: &ArgMatches,
 ) -> Result<()> {
-    let duration_seconds = args
-        .get_one::<u64>("duration")
-        .copied()
-        .unwrap_or(master_config.app_settings.video_duration_default_seconds as u64);
+    let op_start_time = Instant::now();
+    let duration_seconds_arg = args.get_one::<u64>("duration").copied();
+    let duration_seconds = duration_seconds_arg.unwrap_or(master_config.app_settings.video_duration_default_seconds as u64);
     let recording_duration = Duration::from_secs(duration_seconds);
+    debug!(
+        "Record video CLI: duration_arg: {:?}, effective_duration: {:?}, cameras_arg: {:?}, output_arg: {:?}",
+        duration_seconds_arg, recording_duration, args.get_one::<String>("cameras"), args.get_one::<String>("output")
+    );
+    info!("📹 Preparing to record video for {:?} from specified cameras.", recording_duration);
 
+    let media_manager_init_start = Instant::now();
     let media_manager = CameraMediaManager::new();
+    debug!("CameraMediaManager initialized for video recording in {:?}.", media_manager_init_start.elapsed());
 
-    run_generic_camera_op(
+    let result = run_generic_camera_op(
         master_config,
         camera_manager,
         args,
@@ -33,7 +40,9 @@ pub async fn handle_record_video_cli(
             let recording_duration_clone = recording_duration;
 
             async move {
+                let cam_op_start_time = Instant::now();
                 let mut cam_entity = cam_entity_arc.lock().await;
+                let cam_name = cam_entity.config.name.clone();
                 
                 let filename = file_utils::generate_timestamped_filename(
                     &cam_entity.config.name,
@@ -43,8 +52,8 @@ pub async fn handle_record_video_cli(
                 let output_path = operation_output_dir.join(filename);
                 
                 info!(
-                    "Preparing to record video for '{}' to {} for {:?}",
-                    cam_entity.config.name,
+                    "🎬 Preparing to record video for '{}' to {} for {:?}",
+                    cam_name,
                     output_path.display(),
                     recording_duration_clone
                 );
@@ -60,16 +69,19 @@ pub async fn handle_record_video_cli(
                 {
                     Ok(path) => {
                         info!(
-                            "Successfully recorded video for '{}' to {}",
-                            cam_entity.config.name,
-                            path.display()
+                            "✅ Successfully recorded video for '{}' to {} in {:?}",
+                            cam_name,
+                            path.display(),
+                            cam_op_start_time.elapsed()
                         );
                         Ok(())
                     }
                     Err(e) => {
                         error!(
-                            "Failed to record video for '{}': {:#}",
-                            cam_entity.config.name, e
+                            "❌ Failed to record video for '{}' after {:?}: {:#}",
+                            cam_name,
+                            cam_op_start_time.elapsed(),
+                            e
                         );
                         Err(e)
                     }
@@ -77,5 +89,12 @@ pub async fn handle_record_video_cli(
             }
         },
     )
-    .await
+    .await;
+
+    if result.is_ok() {
+        info!("📹 All video recording operations completed successfully in {:?}", op_start_time.elapsed());
+    } else {
+        error!("📹 Video recording operation failed after {:?}. See errors above.", op_start_time.elapsed());
+    }
+    result
 } 
