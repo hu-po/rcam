@@ -15,9 +15,6 @@ use log::{info, error};
 
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
-    // Basic logging first, in case config loading or full logger setup fails.
-    logging_setup::basic_env_logging_init(); 
-
     // Parse CLI arguments early for potential use in logging or config path
     let matches = cli::build_cli().get_matches();
 
