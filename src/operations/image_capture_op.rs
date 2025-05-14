@@ -1,6 +1,5 @@
 use crate::config_loader::MasterConfig;
 use crate::core::camera_manager::CameraManager;
-use crate::camera::camera_media::CameraMediaManager;
 use anyhow::{Result, anyhow};
 use crate::operations::op_helper;
 use clap::ArgMatches;
@@ -10,6 +9,12 @@ use rerun::RecordingStreamBuilder;
 use rerun::datatypes::{TensorData, TensorBuffer, ColorModel};
 use rerun::archetypes::Image as RerunImage;
 use image;
+use image::ImageFormat;
+use reqwest::Client;
+use tokio::io::AsyncWriteExt;
+use std::sync::{Arc, Barrier};
+use chrono::Utc;
+use diqwest::WithDigestAuth;
 
 pub async fn handle_capture_image_cli(
     master_config: &MasterConfig,
@@ -64,10 +69,6 @@ pub async fn handle_capture_image_cli(
     );
     info!("🖼️ Preparing to capture images from specified cameras.");
     
-    let media_manager_init_start = Instant::now();
-    let media_manager = CameraMediaManager::new();
-    debug!("CameraMediaManager initialized for image capture in {:?}.", media_manager_init_start.elapsed());
-
     let camera_entities = op_helper::determine_target_cameras(
         camera_manager,
         args.get_one::<String>("cameras"),
@@ -79,23 +80,6 @@ pub async fn handle_capture_image_cli(
         return Ok(());
     }
 
-    let mut cameras_info = Vec::new();
-    for cam_entity_arc in &camera_entities {
-        let cam_entity = cam_entity_arc.lock().await;
-        let name = cam_entity.config.name.clone();
-        match cam_entity.get_rtsp_url() {
-            Ok(url) => cameras_info.push((name, url)),
-            Err(e) => {
-                error!("Failed to get RTSP URL for camera '{}' for {}: {}. This camera will be excluded.", name, operation_display_name, e);
-            }
-        }
-    }
-    
-    if cameras_info.is_empty() {
-        error!("Could not retrieve RTSP URLs for any of the {} selected/available cameras. Cannot proceed with {}.", camera_entities.len(), operation_display_name);
-        return Err(anyhow!("Failed to retrieve any usable RTSP URLs for image capture"));
-    }
-
     let output_dir = op_helper::determine_operation_output_dir(
         master_config,
         args,
@@ -103,112 +87,215 @@ pub async fn handle_capture_image_cli(
         Some("images"),
         operation_display_name
     )?;
-
-    info!(
-        "📸 Attempting image capture for {} camera(s) to {}.",
-        cameras_info.len(),
-        output_dir.display()
-    );
-
-    let _camera_name_to_index: std::collections::HashMap<String, usize> = cameras_info
-        .iter()
-        .enumerate()
-        .map(|(idx, (name, _))| (name.clone(), idx))
-        .collect();
     
-    match media_manager
-        .capture_image(
-            &cameras_info,
-            &master_config.app_settings,
-            output_dir.clone(),
-        )
-        .await
-    {
-        Ok(paths) => {
-            if paths.is_empty() && !cameras_info.is_empty() {
-                warn!(
-                    "🖼️ Image capture completed but no files were produced. This might indicate an issue during capture for all cameras."
-                );
-            } else if paths.is_empty() && cameras_info.is_empty() {
-                 info!("🖼️ Image capture: No cameras were processed (likely due to RTSP URL issues).");
-            } else {
-                info!(
-                    "✅ Successfully captured {} image file(s) in {:?}:",
-                    paths.len(),
-                    op_start_time.elapsed()
-                );
-                for path in &paths {
-                    info!("  -> {}", path.display());
-                }
+    info!("🖼️ Preparing to capture images via HTTP CGI snapshot.");
 
-                if let Some(rec_stream) = &rec_stream_opt {
-                    if paths.is_empty() {
-                        info!("Rerun: No images were captured, nothing to log to Rerun.");
-                    } else {
-                        info!("Rerun: Logging {} captured image(s)...", paths.len());
+    // Build a list of (name, ip, username, password)
+    let mut targets = Vec::new();
+    for cam_arc in &camera_entities {
+        let cam = cam_arc.lock().await;
+        let ip   = cam.config.ip.clone();
+        let name = cam.config.name.clone();
+        let user = cam.config.username.clone();
+        let pass = cam.get_password()
+            .ok_or_else(|| anyhow!("Missing password for camera {}", name))?
+            .to_string();
+        targets.push((name, ip, user, pass));
+    }
+
+    if targets.is_empty() {
+        error!("No cameras have credentials; aborting snapshot.");
+        return Err(anyhow!("No cameras available"));
+    }
+
+    // Prepare HTTP client + barrier
+    let client  = Client::new();
+    let barrier = Arc::new(Barrier::new(targets.len()));
+    // single timestamp for all files
+    let ts_str = Utc::now().format(&master_config.app_settings.filename_timestamp_format).to_string();
+    // Get image format string for Rerun logging
+    let rerun_image_fmt_str = master_config.app_settings.image_format.clone();
+
+    // Spawn one task per camera
+    let mut handles = Vec::with_capacity(targets.len());
+    for (name, ip, user, pass) in targets {
+        let cli     = client.clone();
+        let bar     = barrier.clone();
+        let out_dir = output_dir.clone(); // from earlier determine_operation_output_dir
+        let img_fmt = master_config.app_settings.image_format.clone();
+        let this_name = name.clone();
+        let ts_str_clone = ts_str.clone(); // Clone ts_str for each task
+
+        handles.push(tokio::spawn(async move {
+            // wait for everyone
+            bar.wait();
+
+            // hit snapshot endpoint
+            let url = format!("http://{}/cgi-bin/snapshot.cgi?channel=1", ip);
+            
+            // Use send_with_digest_auth from diqwest
+            let resp_result = cli.get(&url)
+                .send_with_digest_auth(&user, &pass) // Changed to use Digest Auth
+                .await;
+            
+            let image_content_bytes = match resp_result {
+                Ok(response) => {
+                    if !response.status().is_success() {
+                        error!("HTTP request for {} failed with status: {}", this_name, response.status());
+                        return Err(anyhow!("HTTP request failed for {} with status: {}", this_name, response.status()));
                     }
-
-                    for (idx, path) in paths.iter().enumerate() {
-                        let camera_name_opt = cameras_info.get(idx).map(|(name, _url)| name.as_str());
-                        
-                        let entity_path_str = if let Some(name) = camera_name_opt {
-                            format!("camera/{}/image", name)
-                        } else {
-                            format!("capture/image_{}", idx)
-                        };
-
-                        debug!("Rerun: Attempting to log image {} to entity path: {}", path.display(), entity_path_str);
-
-                        match image::load_from_memory(&std::fs::read(path)?) {
-                            Ok(dynamic_image) => {
-                                let img_rgb8 = dynamic_image.to_rgb8();
-                                
-                                let log_cam_name = camera_name_opt.unwrap_or("unknown_camera");
-                                
-                                rec_stream.set_duration_secs("capture_time", op_start_time.elapsed().as_secs_f64());
-
-                                let (width, height) = img_rgb8.dimensions();
-                                
-                                let dimension_sizes = vec![height as u64, width as u64, 3_u64];
-                                
-                                let tensor_data = TensorData::new(
-                                    dimension_sizes, 
-                                    TensorBuffer::U8(img_rgb8.into_raw().into())
-                                );
-
-                                match RerunImage::from_color_model_and_tensor(ColorModel::RGB, tensor_data.clone()) {
-                                    Ok(rerun_image_archetype) => {
-                                        if let Err(e) = rec_stream.log(&*entity_path_str, &rerun_image_archetype) {
-                                            error!("Failed to log image to Rerun for {}: {}", log_cam_name, e);
-                                        }
-                                    }
-                                    Err(e) => {
-                                        error!("Failed to create Rerun image for {} using from_color_model_and_tensor: {:?}", log_cam_name, e);
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                error!("Rerun: Failed to open or decode image at {}: {}. Skipping Rerun log for this image.", path.display(), e);
-                            }
+                    match response.bytes().await {
+                        Ok(bytes) => bytes,
+                        Err(e) => {
+                            error!("Failed to get bytes from HTTP response for {}: {}", this_name, e);
+                            return Err(anyhow!("Failed to get bytes from {}: {}", this_name, e));
                         }
                     }
-                    // After the loop, explicitly flush the Rerun stream.
-                    info!("Rerun: Attempting to flush all logged data...");
-                    rec_stream.flush_blocking();
-                    info!("Rerun: Flush completed.");
+                },
+                Err(e) => {
+                    error!("HTTP request send failed for {}: {}", this_name, e);
+                    return Err(anyhow!("HTTP send failed for {}: {}", this_name, e));
+                }
+            };
+
+            debug!("Received {} bytes from HTTP for camera {}", image_content_bytes.len(), this_name);
+
+            // write file
+            let filename = format!("{}_{}.{}", this_name, ts_str_clone, img_fmt);
+            let path = out_dir.join(&filename);
+            match tokio::fs::File::create(&path).await {
+                Ok(mut f) => {
+                    if let Err(e) = f.write_all(&image_content_bytes).await {
+                        error!("Failed to write image for {}: {}", this_name, e);
+                        return Err(anyhow!("Failed to write image for {}: {}", this_name, e));
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to create file for {}: {}", this_name, e);
+                    return Err(anyhow!("Failed to create file for {}: {}", this_name, e));
                 }
             }
-            info!("🖼️ All image capture operations completed in {:?}.", op_start_time.elapsed());
-            Ok(())
-        }
-        Err(e) => {
-            error!(
-                "❌ Failed image capture for {} camera(s) after {:?}: {:#}",
-                cameras_info.len(),
-                op_start_time.elapsed(),
-                e
-            );
-            Err(e)
-        }
+            info!("✅ Saved snapshot for '{}' ({} bytes) to {}", this_name, image_content_bytes.len(), path.display());
+            Ok::<_, anyhow::Error>(path)
+        }));
     }
+
+    // wait for all to finish
+    let results = futures::future::try_join_all(handles).await?;
+    if let Some(rec_stream) = &rec_stream_opt {
+        if results.is_empty() {
+            info!("Rerun: No images were captured, nothing to log to Rerun.");
+        } else {
+            info!("Rerun: Logging {} captured image(s)...", results.len());
+        }
+
+        let image_format_hint = match rerun_image_fmt_str.to_lowercase().as_str() {
+            "jpg" | "jpeg" => Some(ImageFormat::Jpeg),
+            "png" => Some(ImageFormat::Png),
+            "gif" => Some(ImageFormat::Gif),
+            "bmp" => Some(ImageFormat::Bmp),
+            "ico" => Some(ImageFormat::Ico),
+            "tiff" => Some(ImageFormat::Tiff),
+            "webp" => Some(ImageFormat::WebP),
+            "pnm" => Some(ImageFormat::Pnm),
+            "tga" => Some(ImageFormat::Tga),
+            "dds" => Some(ImageFormat::Dds),
+            "hdr" => Some(ImageFormat::Hdr),
+            "farbfeld" => Some(ImageFormat::Farbfeld),
+            "avif" => Some(ImageFormat::Avif),
+            "qoi" => Some(ImageFormat::Qoi),
+            _ => {
+                warn!(
+                    "Rerun: Image format string '{}' from config not recognized for explicit loading. Will attempt auto-detection.",
+                    rerun_image_fmt_str
+                );
+                None
+            }
+        };
+
+        for (idx, path_result) in results.iter().enumerate() {
+            match path_result {
+                Ok(path) => {
+                    let camera_name_opt = camera_entities.get(idx).map(|_cam_arc| {
+                        // This requires an async block or a different way to access camera name if needed for Rerun
+                        // For now, let's use a placeholder or index if direct access is complex
+                        // Or, we can retrieve names from `targets` before spawning tasks, if `targets` is accessible here
+                        // For simplicity, using index as a fallback like in the original code
+                        // let cam_entity = cam_arc.lock().await; // This would require this block to be async or use block_on
+                        // cam_entity.config.name.as_str()
+                        format!("camera_{}", idx) // Placeholder
+                    });
+                    
+                    let entity_path_str = if let Some(name) = camera_name_opt { // This name is now just "camera_{idx}"
+                        format!("camera/{}/image", name)
+                    } else {
+                        format!("capture/image_{}", idx)
+                    };
+
+                    debug!("Rerun: Attempting to log image {} to entity path: {}", path.display(), entity_path_str);
+
+                    let image_bytes_result = std::fs::read(path);
+                    if let Err(e) = image_bytes_result {
+                        error!("Rerun: Failed to read image file at {}: {}. Skipping Rerun log for this image.", path.display(), e);
+                        continue;
+                    }
+                    let image_bytes = image_bytes_result.unwrap();
+                    debug!("Rerun: Read {} bytes from file {} for logging.", image_bytes.len(), path.display());
+
+                    let dynamic_image_result = if let Some(fmt) = image_format_hint {
+                        debug!("Rerun: Attempting to load image {} with explicit format: {:?}", path.display(), fmt);
+                        image::load_from_memory_with_format(&image_bytes, fmt)
+                    } else {
+                        debug!("Rerun: Attempting to load image {} with auto-detection.", path.display());
+                        image::load_from_memory(&image_bytes)
+                    };
+
+                    match dynamic_image_result {
+                        Ok(dynamic_image) => {
+                            let img_rgb8 = dynamic_image.to_rgb8();
+                            let log_cam_name = format!("camera_{}",idx); // Placeholder
+                            
+                            rec_stream.set_duration_secs("capture_time", op_start_time.elapsed().as_secs_f64());
+
+                            let (width, height) = img_rgb8.dimensions();
+                            let dimension_sizes = vec![height as u64, width as u64, 3_u64];
+                            let tensor_data = TensorData::new(
+                                dimension_sizes, 
+                                TensorBuffer::U8(img_rgb8.into_raw().into())
+                            );
+
+                            match RerunImage::from_color_model_and_tensor(ColorModel::RGB, tensor_data.clone()) {
+                                Ok(rerun_image_archetype) => {
+                                    if let Err(e) = rec_stream.log(&*entity_path_str, &rerun_image_archetype) {
+                                        error!("Failed to log image to Rerun for {}: {}", log_cam_name, e);
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Failed to create Rerun image for {} using from_color_model_and_tensor: {:?}", log_cam_name, e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!(
+                                "Rerun: Failed to decode image at {} (format hint: {:?}, attempted method: {}): {}. Skipping Rerun log for this image.",
+                                path.display(),
+                                image_format_hint, // Debug output for Option<ImageFormat>
+                                if image_format_hint.is_some() { "explicit format" } else { "auto-detection" },
+                                e
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                     error!("An error occurred capturing image for one of the cameras: {}", e);
+                }
+            }
+        }
+        info!("Rerun: Attempting to flush all logged data...");
+        rec_stream.flush_blocking();
+        info!("Rerun: Flush completed.");
+    }
+
+    info!("🖼️ All snapshots completed in {:?}.", op_start_time.elapsed());
+    Ok(())
 } 

@@ -127,3 +127,10 @@ TOTAL_SIZE=$(du -h "$OUTPUT_FILE" | awk '{print $1}')
 echo "Context file created at $OUTPUT_FILE"
 echo "Total files: $TOTAL_FILES"
 echo "Total size: $TOTAL_SIZE"
+
+if command -v xclip >/dev/null 2>&1; then
+  xclip -selection clipboard < "$OUTPUT_FILE"
+  echo "Contents of $OUTPUT_FILE copied to clipboard."
+else
+  echo "xclip not found. Please install xclip to copy to clipboard."
+fi
