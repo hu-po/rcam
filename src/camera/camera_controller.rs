@@ -1,28 +1,24 @@
-use crate::camera::camera_entity::CameraEntity;
-use anyhow::{Result, Context, anyhow, bail};
-use log::{info, error, debug, warn};
-use reqwest::{Client, StatusCode};
-use chrono::{DateTime, Utc, NaiveDateTime};
-use crate::app_config::ApplicationConfig;
-use std::time::Instant;
+use anyhow::{Result, anyhow};
+use log::{debug, warn};
+use chrono::{DateTime, Utc}; // Added DateTime, Utc imports
+// AppSettings is unused in active code, will be caught by compiler if truly unused later
+// use crate::config_loader::AppSettings;
 
 #[derive(Clone)]
 pub struct CameraController {
-    http_client: Client,
+    // http_client: Client, // Commented out
 }
 
 impl CameraController {
     pub fn new() -> Self {
-        debug!("🔧 Initializing CameraController...");
-        let start_time = Instant::now();
-        let controller = CameraController {
-            http_client: Client::new(),
-        };
-        debug!("✅ CameraController initialized in {:?}", start_time.elapsed());
-        controller
+        debug!("🔧 Initializing CameraController... (currently stubbed)");
+        CameraController {}
     }
 
-    pub async fn get_camera_time(&self, camera: &CameraEntity, app_config: &ApplicationConfig) -> Result<DateTime<Utc>> {
+    pub async fn get_camera_time(&self, _camera_name: &str, _ip: &str, _username: &str, _password_env_var: &str, _app_config: &crate::config_loader::AppSettings) -> Result<DateTime<Utc>> {
+        warn!("get_camera_time is currently stubbed and will return an error.");
+        Err(anyhow!("get_camera_time in CameraController is stubbed"))
+        /* 
         let cam_name = &camera.config.name;
         debug!("⏱️ Attempting to get time for camera (HTTP CGI): {}", cam_name);
         let overall_start_time = Instant::now();
@@ -57,7 +53,8 @@ impl CameraController {
             let digest_req_start_time = Instant::now();
             response = self.http_client
                 .get(&url)
-                .basic_auth(username, Some(password))
+                // .digest_auth(username, Some(password), &response) // diqwest would be used here
+                .basic_auth(username, Some(password)) // Placeholder, diqwest needed
                 .send()
                 .await
                 .with_context(|| format!("Digest auth HTTP GET request to {} failed for '{}' 🛡️💥", url, cam_name))?;
@@ -65,75 +62,32 @@ impl CameraController {
         }
 
         if !response.status().is_success() {
-            let status = response.status();
-            let body_text_res = response.text().await;
-            let body_text = body_text_res.as_deref().unwrap_or("<failed to read body>");
             error!(
-                "❌ HTTP CGI get_time failed for '{}'. Status: {}. URL: {}. Body: {}. Total time: {:?}",
-                cam_name, status, url, body_text, overall_start_time.elapsed()
+                "❌ HTTP request for camera time failed for '{}' with status {} after all auth attempts. URL: {}. Body: {:?}",
+                cam_name,
+                response.status(),
+                url,
+                response.text().await.unwrap_or_else(|_| "<failed to read body>".to_string())
             );
             bail!(
-                "HTTP CGI get_time failed for '{}'. Status: {}. URL: {}. Body: {}",
-                cam_name, status, url, body_text
+                "HTTP request for camera time failed for '{}' with status {} after all auth attempts. URL: {}",
+                cam_name,
+                response.status(),
+                url
             );
         }
 
-        let body_read_start_time = Instant::now();
-        let body = response.text().await
-            .with_context(|| format!("Failed to read response body from {} for '{}' after successful status 📄💥", url, cam_name))?;
-        debug!("  Read response body for '{}' in {:?}. Length: {} bytes", cam_name, body_read_start_time.elapsed(), body.len());
-        
-        let cleaned_body = body.trim().replace("'", "").replace("\"", "");
-        debug!("  Cleaned body for parsing: '{}'", cleaned_body);
-        
-        // Try parsing common timestamp formats
-        let formats_to_try = [
-            "%Y-%m-%d %H:%M:%S",       // Common space separated
-            "%Y-%m-%dT%H:%M:%SZ",      // ISO8601 Z_ulo_offset
-            "%Y-%m-%dT%H:%M:%S%z",     // ISO8601 with offset
-            "%Y-%m-%d %H:%M:%S%z",      // Space separated with offset
-        ];
+        let body = response.text().await.context("Failed to read response body for camera time")?;
+        debug!("  Successfully fetched time string for '{}': '{}' in {:?}", cam_name, body.trim(), overall_start_time.elapsed());
 
-        // Attempt to parse the whole cleaned_body first
-        for fmt in formats_to_try {
-            if let Ok(naive_dt) = NaiveDateTime::parse_from_str(&cleaned_body, fmt) {
-                let datetime_utc = DateTime::<Utc>::from_naive_utc_and_offset(naive_dt, Utc);
-                info!("✅ Successfully parsed time for camera '{}' (format: '{}'): {}. Total time: {:?}", cam_name, fmt, datetime_utc, overall_start_time.elapsed());
-                return Ok(datetime_utc);
-            }
-        }
-
-        // Attempt to find and parse a timestamp-like substring
-        // This is less reliable and more of a fallback.
-        if let Some(ts_str) = cleaned_body.split_whitespace().find(|s| formats_to_try.iter().any(|fmt| NaiveDateTime::parse_from_str(s, fmt).is_ok())) {
-            for fmt in formats_to_try {
-                if let Ok(naive_dt) = NaiveDateTime::parse_from_str(ts_str, fmt) {
-                    let datetime_utc = DateTime::<Utc>::from_naive_utc_and_offset(naive_dt, Utc);
-                    info!("✅ Successfully parsed time substring '{}' for camera '{}' (format: '{}'): {}. Total time: {:?}", ts_str, cam_name, fmt, datetime_utc, overall_start_time.elapsed());
-                    return Ok(datetime_utc);
-                }
-            }
-        }
+        // Example: var sys_time="2023-10-27 10:30:00";
+        // More robust parsing needed depending on actual camera output format
+        let parsed_time = chrono::NaiveDateTime::parse_from_str(body.trim().split('=').nth(1).unwrap_or_default().trim_matches(|c| c == '\"' || c == ';'), "%Y-%m-%d %H:%M:%S")
+            .with_context(|| format!("Failed to parse time string '{}' for camera '{}'", body.trim(), cam_name))?;
         
-        // Try to extract from var assignments like `var CurrentTime = '...';`
-        if let Some(start_idx) = cleaned_body.find("=") {
-            let potential_time_part = cleaned_body[start_idx+1..].trim().trim_matches(|c: char| c == '\'' || c == '"' || c == ';');
-            for fmt in formats_to_try {
-                 if let Ok(naive_dt) = NaiveDateTime::parse_from_str(potential_time_part, fmt) {
-                    let datetime_utc = DateTime::<Utc>::from_naive_utc_and_offset(naive_dt, Utc);
-                    info!("✅ Successfully parsed time from assignment for camera '{}' (format: '{}'): {}. Total time: {:?}", cam_name, fmt, datetime_utc, overall_start_time.elapsed());
-                    return Ok(datetime_utc);
-                }
-            }
-        }
-
-        warn!(
-            "⚠️ Could not find or parse a recognizable time string for '{}' from URL '{}'. Cleaned Body: '{}'. Total time: {:?}",
-            cam_name, url, cleaned_body, overall_start_time.elapsed()
-        );
-        bail!(
-            "Could not find or parse a recognizable time string in response from '{}' ({}). Cleaned Body: {}",
-            cam_name, url, cleaned_body
-        );
+        Ok(DateTime::from_naive_utc_and_offset(parsed_time, Utc))
+        */
     }
+
+    // ... other methods ...
 }

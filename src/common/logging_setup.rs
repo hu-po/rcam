@@ -13,9 +13,10 @@ pub fn initialize_logging(config: Option<&MasterConfig>, cli_matches: &clap::Arg
     let log_level_str = if cli_matches.get_flag("debug") {
         "debug".to_string()
     } else {
-        config
-            .and_then(|c| c.app_settings.log_level.clone())
-            .unwrap_or_else(|| "info".to_string()) // Default log level
+        config.map_or_else(
+            || "info".to_string(), // Default if config is None
+            |c| c.application.log_level.clone().unwrap_or_else(|| "info".to_string()) // Use log_level from config if Some, else default to "info"
+        )
     };
 
     match log_level_str.to_lowercase().as_str() {

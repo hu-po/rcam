@@ -2,7 +2,8 @@ use serde::Deserialize;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct ApplicationConfig {
-    pub output_directory: String,
+    pub output_directory_base: String,
+    pub default_config_path: String,
     pub image_format: String, // e.g., "jpg", "png"
     pub jpeg_quality: Option<u8>, // JPEG quality (0-100)
     pub png_compression: Option<u8>, // PNG compression level (0-9 for zopfli/libdeflate, or specific to encoder)
@@ -17,12 +18,14 @@ pub struct ApplicationConfig {
     pub rerun_flush_timeout_secs: Option<f32>,
     pub rerun_memory_limit: Option<String>, // e.g., "50%", "2GB"
     pub rerun_drop_at_latency: Option<String>, // e.g., "100ms", "1s"
+    pub realsense_api_version: Option<String>, // Target librealsense version
 }
 
 impl Default for ApplicationConfig {
     fn default() -> Self {
         ApplicationConfig {
-            output_directory: "./output".to_string(),
+            output_directory_base: "./output".to_string(),
+            default_config_path: "config/tatbot.yaml".to_string(), // Added default
             image_format: "jpg".to_string(),
             jpeg_quality: Some(95), // Default JPEG quality
             png_compression: Some(3), // Default PNG compression
@@ -37,6 +40,7 @@ impl Default for ApplicationConfig {
             rerun_flush_timeout_secs: Some(10.0),
             rerun_memory_limit: Some("90%".to_string()), // Default Rerun memory limit
             rerun_drop_at_latency: Some("500ms".to_string()), // Default: no drop-at-latency
+            realsense_api_version: None, // Default to None
         }
     }
 } 

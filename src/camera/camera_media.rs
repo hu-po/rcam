@@ -1,4 +1,5 @@
-use crate::app_config::ApplicationConfig;
+// use crate::app_config::ApplicationConfig; // This import is unused
+use crate::config_loader::AppSettings;
 use anyhow::{Context, Result, anyhow};
 use log::{info, warn, error, debug};
 use std::path::PathBuf;
@@ -16,6 +17,7 @@ use chrono::Utc;
 use futures::future::join_all;
 use chrono::DateTime;
 use std::sync::Barrier;
+use std::time::Instant;
 
 
 #[derive(Clone)]
@@ -76,7 +78,7 @@ impl CameraMediaManager {
     pub async fn capture_image(
         &self,
         cameras_info: &[(String, String)], // List of (camera_name, rtsp_url)
-        app_config: &ApplicationConfig,
+        app_config: &AppSettings,
         output_dir: PathBuf,
     ) -> Result<Vec<PathBuf>> {
         info!("📸 Attempting image capture for {} cameras.", cameras_info.len());
@@ -247,7 +249,7 @@ impl CameraMediaManager {
     pub async fn record_video(
         &self,
         cameras_info: &[(String, String)],
-        app_config: &ApplicationConfig,
+        app_config: &AppSettings,
         output_dir: PathBuf,
         duration: Duration,
     ) -> Result<Vec<PathBuf>> {
@@ -344,7 +346,7 @@ impl CameraMediaManager {
                 let camera_reported_fps: f64 = cap_guard.get(videoio::CAP_PROP_FPS)
                     .map_err(|e| anyhow::Error::from(e).context(format!("OpenCV: Failed to get CAP_PROP_FPS for '{}'", cam_name_clone)))?;
                 
-                let common_fps = app_config_clone.video_fps as f64; // FPS to be used for recording
+                let common_fps = app_config_clone.video_fps.unwrap_or(30.0) as f64; // FPS to be used for recording
 
                 if frame_width <= 0 || frame_height <= 0 {
                     let err_msg = format!("Invalid frame dimensions ({}x{}) for camera '{}'", frame_width, frame_height, cam_name_clone);

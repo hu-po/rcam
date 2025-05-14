@@ -1,6 +1,6 @@
 # `rcam` 📸
 
-A tool for capturing images and videos from IP cameras using Rust.
+A tool for synchronously capturing images (including RGB and Depth from Realsense devices) and videos from a variety of camera types (IP cameras, Intel Realsense) using Rust.
 
 ## Environment Variables ⚙️
 
@@ -41,33 +41,30 @@ cargo test
 The main executable is `rcam`.
 
 **Common Flags:**
-- `-c, --config <FILE>`: Sets a custom configuration file (e.g., `rcam --config config/cameras.yaml capture-image`).
+- `-c, --config <FILE>`: Sets a custom configuration file (e.g., `rcam --config config/tatbot.yaml capture-image`).
 - `-d, --debug`: Enables debug logging.
 
 **Subcommands:**
 
 ### `capture-image` 🖼️
-Captures a single image from specified or all cameras.
+Captures a single image from specified or all cameras. For Realsense devices, this includes both RGB color and Depth (Z16) images. Captures across all selected devices are triggered to be as synchronous as possible.
 
 - Capture from all cameras:
   ```bash
   rcam capture-image
   ```
-- Capture from specific cameras (e.g., `front-door`, `backyard`):
+- Capture from specific cameras (e.g., an IP camera `front-door` and a Realsense camera `realsense_d405`):
   ```bash
-  rcam capture-image --cameras front-door,backyard
+  rcam capture-image --cameras front-door,realsense_d405
   ```
 - Specify an output directory:
   ```bash
   rcam capture-image --output /path/to/save/images
   ```
-- Add a delay before capturing (in seconds):
+- The `--delay` flag is currently ignored for `capture-image` as captures are internally synchronized.
+- Capture and log to Rerun viewer (IP camera images, Realsense RGB and Depth images):
   ```bash
-  rcam capture-image --delay 5
-  ```
-- Capture and log to Rerun viewer:
-  ```bash
-  rcam capture-image --cameras front-door --rerun
+  rcam capture-image --cameras front-door,realsense_d405 --rerun
   ```
 
 ### `capture-video` 📹

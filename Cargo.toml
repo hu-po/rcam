@@ -20,5 +20,8 @@ tracing = "0.1.37"
 tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
 rerun = "0.23.2"
 diqwest = "3.1.0"
+realsense-rust = "1.2.3"
+bytemuck = { version = "1", features = ["derive"] }
+async-trait = "0.1"
 
 [dev-dependencies]

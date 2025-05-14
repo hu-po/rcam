@@ -8,64 +8,97 @@ use log::{info, warn, error, debug};
 use futures::future::join_all;
 use tokio::task::JoinHandle; // For explicit JoinHandle type
 use std::time::Instant; // Added Instant
+use anyhow::anyhow; // Import anyhow::anyhow
 
 pub async fn handle_verify_times_cli(
     master_config: &MasterConfig,
     camera_manager: &CameraManager,
-    // _args: &clap::ArgMatches, // Not used for now, but could be for specific options
-) -> Result<()> { // Changed return type to anyhow::Result
-    let op_start_time = Instant::now();
-    info!("⏱️ Handling verify-times command...");
+    _args: &clap::ArgMatches, // Prefixed with underscore as it's unused
+) -> Result<()> {
+    info!("Verifying camera time synchronization...");
+    let verify_start_time = Instant::now();
 
-    let controller_init_start = Instant::now();
+    let system_time_now = Utc::now();
+    info!("Current system time (UTC): {}", system_time_now.to_rfc3339());
+
     let camera_controller = CameraController::new(); 
-    debug!("CameraController initialized for time verification in {:?}.", controller_init_start.elapsed());
+    debug!("CameraController initialized for time verification in {:?}.", verify_start_time.elapsed());
 
     let cameras_fetch_start = Instant::now();
-    let cameras_to_target = camera_manager.get_all_cameras().await;
+    let cameras_to_target = camera_manager.get_all_devices().await;
     debug!("Fetched {} cameras to target in {:?}.", cameras_to_target.len(), cameras_fetch_start.elapsed());
 
     if cameras_to_target.is_empty() {
-        warn!("🤔 No cameras configured to verify time synchronization. Operation finished in {:?}.", op_start_time.elapsed());
+        info!("No cameras found to verify time synchronization.");
         return Ok(());
     }
 
-    let system_time_now = Utc::now();
-    info!("🌍 Current system time (UTC): {}", system_time_now.to_rfc3339());
-
     let mut time_check_tasks: Vec<JoinHandle<Result<(String, DateTime<Utc>)>>> = Vec::new();
-    let task_creation_start_time = Instant::now();
+    let master_config_clone = master_config.clone(); // Clone master_config for static lifetime
 
     for cam_entity_arc in cameras_to_target {
         let controller_clone = camera_controller.clone();
-        let app_settings_clone = master_config.app_settings.clone();
+        // app_settings_clone is derived from master_config_clone inside the task now
+        // let app_settings_clone = master_config.application.clone(); // Old line
+        let current_system_time_clone = system_time_now.clone();
+        let mc_clone_for_task = master_config_clone.clone(); // Clone the Arc-like master_config_clone for the task
         
         let task_spawn_start = Instant::now();
-        let task = tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             let cam_entity_lock_start = Instant::now();
             let cam_entity = cam_entity_arc.lock().await;
-            let cam_name_clone = cam_entity.config.name.clone();
-            debug!("  Task for '{}': Locked camera entity in {:?}.", cam_name_clone, cam_entity_lock_start.elapsed());
-            info!("  Querying time for camera: '{}' 🛰️", cam_name_clone);
+            let cam_name_clone = cam_entity.get_name();
+            let cam_type_clone = cam_entity.get_type();
+            let app_settings_task_clone = mc_clone_for_task.application.clone(); // Use cloned master_config
+            debug!(
+                "  Task for '{}' (Type: {}): Locked camera entity in {:?}. Querying time...", 
+                cam_name_clone, cam_type_clone, cam_entity_lock_start.elapsed()
+            );
             let get_time_start = Instant::now();
             
-            // Assuming get_camera_time will be updated to return anyhow::Result<DateTime<Utc>>
-            // The error will be an anyhow::Error, which includes context.
-            match controller_clone.get_camera_time(&*cam_entity, &app_settings_clone).await {
-                Ok(camera_time) => {
-                    info!("  ✅ Camera '{}' time (UTC): {}. Fetched in {:?}.", cam_name_clone, camera_time.to_rfc3339(), get_time_start.elapsed());
-                    Ok((cam_name_clone, camera_time))
+            if cam_type_clone == "ip-camera" {
+                let ip_camera_details = mc_clone_for_task.cameras.iter() // Use cloned master_config
+                    .find(|cfg| cfg.get_name() == &cam_name_clone)
+                    .and_then(|cam_cfg| match cam_cfg {
+                        crate::config_loader::CaptureDeviceConfig::IpCamera { specifics, .. } => Some(specifics.clone()), // Clone specifics
+                        _ => None,
+                    });
+
+                if let Some(specifics) = ip_camera_details {
+                    let username_str = specifics.username.as_deref().unwrap_or("");
+                    let password_env_var_placeholder = ""; 
+
+                    match controller_clone.get_camera_time(&cam_name_clone, &specifics.ip, username_str, password_env_var_placeholder, &app_settings_task_clone).await {
+                        Ok(camera_time) => {
+                            let time_diff = camera_time.timestamp_millis() - current_system_time_clone.timestamp_millis();
+                            info!(
+                                "  ✅ IP Camera '{}' time (UTC): {}. System time (UTC): {}. Difference: {}ms. Fetched in {:?}.",
+                                cam_name_clone, camera_time.to_rfc3339(), current_system_time_clone.to_rfc3339(), time_diff, get_time_start.elapsed()
+                            );
+                            Ok((cam_name_clone, camera_time))
+                        }
+                        Err(e) => {
+                            error!("  ❌ Failed to get time for IP camera '{}' after {:?}: {:#}", cam_name_clone, get_time_start.elapsed(), e);
+                            Err(e)
+                        }
+                    }
+                } else {
+                    error!(" ❌ Could not find IP camera specific config for '{}' to perform time sync.", cam_name_clone);
+                    Err(anyhow!("Missing IP camera config for time sync: {}", cam_name_clone))
                 }
-                Err(e) => {
-                    error!("  ❌ Failed to get time for camera '{}' after {:?}: {:#}", cam_name_clone, get_time_start.elapsed(), e);
-                    Err(e) // Propagate anyhow::Error from the task
-                }
+            } else {
+                warn!(
+                    "  Skipping time synchronization for non-IP camera '{}' (Type: {}). HTTP time sync not applicable.",
+                    cam_name_clone,
+                    cam_type_clone
+                );
+                Err(anyhow!("Time sync not applicable for device type {}: {}", cam_type_clone, cam_name_clone))
             }
         });
-        time_check_tasks.push(task);
+        time_check_tasks.push(handle);
         debug!("  Spawned time check task for a camera in {:?}. Total tasks: {}", task_spawn_start.elapsed(), time_check_tasks.len());
     }
-    debug!("All time check tasks ({}) spawned in {:?}.", time_check_tasks.len(), task_creation_start_time.elapsed());
+    debug!("All time check tasks ({}) spawned in {:?}.", time_check_tasks.len(), verify_start_time.elapsed());
 
     let join_all_start_time = Instant::now();
     let results = join_all(time_check_tasks).await;
@@ -90,16 +123,16 @@ pub async fn handle_verify_times_cli(
 
     if successful_times.is_empty() {
         if task_errors > 0 {
-            warn!("⚠️ Could not retrieve time from any camera due to {} errors. Operation finished in {:?}.", task_errors, op_start_time.elapsed());
+            warn!("⚠️ Could not retrieve time from any camera due to {} errors. Operation finished in {:?}.", task_errors, verify_start_time.elapsed());
         } else {
-            warn!("🤔 No camera times were successfully retrieved (no cameras or other issue). Operation finished in {:?}.", op_start_time.elapsed());
+            warn!("🤔 No camera times were successfully retrieved (no cameras or other issue). Operation finished in {:?}.", verify_start_time.elapsed());
         }
         // Still returns Ok(()) as per original logic, but logs indicate issues.
         // If an error should be propagated: return Err(anyhow::anyhow!("Failed to retrieve time from any camera"));
         return Ok(());
     }
 
-    let tolerance_seconds = master_config.app_settings.time_sync_tolerance_seconds as i64;
+    let tolerance_seconds = master_config.application.time_sync_tolerance_seconds.unwrap_or(0.0) as i64; // Ensure there is a default if None
     info!("🕒 Time synchronization tolerance: {} seconds", tolerance_seconds);
 
     let mut all_synced_system = true;
@@ -129,7 +162,7 @@ pub async fn handle_verify_times_cli(
 
     let mut all_cameras_inter_synced = true;
     if successful_times.len() > 1 {
-        info!("��️ Performing inter-camera time synchronization checks...");
+        info!("🔄 Performing inter-camera time synchronization checks...");
         let inter_sync_check_start = Instant::now();
         for i in 0..successful_times.len() {
             for j in (i + 1)..successful_times.len() {
@@ -160,6 +193,6 @@ pub async fn handle_verify_times_cli(
         info!("ℹ️ Only one camera time successfully retrieved, skipping inter-camera sync check.");
     }
 
-    info!("🏁 Verify-times operation finished in {:?}.", op_start_time.elapsed());
+    info!("🏁 Verify-times operation finished in {:?}.", verify_start_time.elapsed());
     Ok(())
 } 

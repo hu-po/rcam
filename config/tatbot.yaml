@@ -1,53 +1,86 @@
 application:
-  output_directory: "./output" # Default directory for saving images and videos
-  image_format: "jpg" # e.g., "jpg", "png"
-  jpeg_quality: 95
-  png_compression: 3
+  output_directory_base: "output"
+  default_config_path: "config/tatbot.yaml"
+  image_format: "png" # Default image format for saving (e.g., "jpg", "png")
+  jpeg_quality: 90 # For JPG, 1-100
+  png_compression: 6 # For PNG, 0-9 (flate2 compression level)
   video_format: "mp4" # Container, e.g., "mp4", "mkv"
   video_codec: "h264" # e.g., "h264", "mjpeg", "copy" (to copy stream directly if supported)
-  video_fps: 3.0 # Target recording FPS (float)
-  video_duration_default_seconds: 5 # Default recording duration in seconds (integer)
-  filename_timestamp_format: "%Yy%mm%dd%Hh%Mm%Ss" # strftime format string for filenames
+  video_fps: 15.0 # Target recording FPS for IP Cam RTSP (float)
+  video_duration_default_seconds: 10 # Default recording duration in seconds (integer)
+  filename_timestamp_format: "%Y%m%d_%H%M%S_%f" # strftime format string for filenames (%f for milliseconds)
   rtsp_transport: "tcp" # Preferred RTSP transport ("tcp" or "udp") - May be handled by OpenCV internally
   time_sync_tolerance_seconds: 5.0 # Tolerance for verify-time command (float)
   log_level: "info" # e.g., "error", "warn", "info", "debug", "trace"
   cgi_time_path: "/cgi-bin/global.cgi?action=getCurrentTime"
   rerun_flush_timeout_secs: 10.0 # Rerun SDK flush timeout in seconds (float)
-  rerun_memory_limit: "90%" # Example: "50%", "2G", "200MB"
-  rerun_drop_at_latency: "500ms" # Example: "100ms", "1s"
+  rerun_memory_limit: "75%" # Example: "50%", "2G", "200MB"
+  rerun_drop_at_latency: "200ms" # Example: "100ms", "1s"
+  realsense_api_version: "2.54.2" # Target librealsense version, for info/compatibility checks
 
 cameras:
-  - name: "camera1"
+  - !IpCamera
+    name: "camera1"
+    type: "ip_camera"
     device_name: "AMC108EF91BA102126"
     ip: "192.168.1.91"
     username: "admin"
     mac_address: "A0:60:32:05:E1:7C"
     # Password should be set via environment variable: CAMERA1_PASSWORD
+    # Example rtsp_port and rtsp_path (add if applicable for this camera)
+    # rtsp_port: 554
+    # rtsp_path: "/cam/realmonitor?channel=1&subtype=0"
 
-  - name: "camera2"
+  - !IpCamera
+    name: "camera2"
+    type: "ip_camera"
     device_name: "AMC10802AF9B53A9D5"
     ip: "192.168.1.92"
     username: "admin"
     mac_address: "A0:60:32:04:E4:D2"
-    # Password should be set via environment variable: CAMERA2_PASSWORD
 
-  - name: "camera3"
+  - !IpCamera
+    name: "camera3"
+    type: "ip_camera"
     device_name: "AMC10858C5C8435EF5"
     ip: "192.168.1.93"
     username: "admin"
     mac_address: "A0:60:32:04:E7:6A"
-    # Password should be set via environment variable: CAMERA3_PASSWORD
 
-  - name: "camera4"
+  - !IpCamera
+    name: "camera4"
+    type: "ip_camera"
     device_name: "AMC108D0D9673DEA55"
     ip: "192.168.1.94"
     username: "admin"
     mac_address: "A0:60:32:04:EB:27"
-    # Password should be set via environment variable: CAMERA4_PASSWORD
 
-  - name: "camera5"
+  - !IpCamera
+    name: "camera5"
+    type: "ip_camera"
     device_name: "AMC108A416274B2DA7"
     ip: "192.168.1.95"
     username: "admin"
     mac_address: "A0:60:32:05:DF:C9"
-    # Password should be set via environment variable: CAMERA5_PASSWORD 
+
+  - !RealsenseCamera
+    name: "realsense1"
+    type: "realsense_camera"
+    serial_number: "230422273017"
+    color_width: 1280
+    color_height: 720
+    color_fps: 30
+    depth_width: 1280
+    depth_height: 720
+    depth_fps: 30
+
+  - !RealsenseCamera
+    name: "realsense2"
+    type: "realsense_camera"
+    serial_number: "218622278376"
+    color_width: 1280
+    color_height: 720
+    color_fps: 30
+    depth_width: 1280
+    depth_height: 720
+    depth_fps: 30
