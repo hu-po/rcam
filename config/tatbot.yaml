@@ -5,8 +5,8 @@ application:
   png_compression: 3
   video_format: "mp4" # Container, e.g., "mp4", "mkv"
   video_codec: "h264" # e.g., "h264", "mjpeg", "copy" (to copy stream directly if supported)
-  video_fps: 25.0 # Target recording FPS (float)
-  video_duration_default_seconds: 300 # Default recording duration in seconds (integer)
+  video_fps: 3.0 # Target recording FPS (float)
+  video_duration_default_seconds: 5 # Default recording duration in seconds (integer)
   filename_timestamp_format: "%Yy%mm%dd%Hh%Mm%Ss" # strftime format string for filenames
   rtsp_transport: "tcp" # Preferred RTSP transport ("tcp" or "udp") - May be handled by OpenCV internally
   time_sync_tolerance_seconds: 5.0 # Tolerance for verify-time command (float)
