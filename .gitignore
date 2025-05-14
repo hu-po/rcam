@@ -21,3 +21,7 @@ target/
 
 # Output directory
 output/
+
+# lock files
+*.lock
+Cargo.lock
