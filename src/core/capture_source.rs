@@ -7,7 +7,6 @@ use async_trait::async_trait;
 #[derive(Debug, Clone)]
 pub struct RsColorFrameData {
     pub rgb_data: Vec<u8>,    // Raw RGB8 data
-    pub path: PathBuf,     // Path where the image was saved
     pub width: u32,
     pub height: u32,
 }
@@ -16,7 +15,6 @@ pub struct RsColorFrameData {
 pub struct RsDepthFrameData {
     pub depth_data: Vec<u16>, // Raw Z16 depth data
     pub depth_units: f32,     // Depth units in meters per step
-    pub path: PathBuf,        // Path where the raw depth image was saved
     pub width: u32,
     pub height: u32,
 }

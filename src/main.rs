@@ -1,7 +1,5 @@
 mod cli;
 mod config_loader;
-mod app_config;
-mod camera_config;
 mod camera;
 mod core;
 mod operations;

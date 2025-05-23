@@ -193,7 +193,7 @@ impl RealsenseDevice {
                         image::save_buffer_with_format(&color_path, &rgb_pixel_data, width, height, image::ColorType::Rgb8, image::ImageFormat::Png)
                             .with_context(|| format!("RS [{}]: Failed to save color image to {:?}", name_clone, color_path))?;
                         info!("RS [{}]: Saved color image to {:?}", name_clone, color_path);
-                        processed_color_data = Some(RsColorFrameData { rgb_data: rgb_pixel_data, path: color_path, width, height });
+                        processed_color_data = Some(RsColorFrameData { rgb_data: rgb_pixel_data, width, height });
                     } else {
                          warn!("RS [{}]: Color stream enabled, but no ColorFrame found in frameset.", name_clone);
                     }
@@ -229,7 +229,7 @@ impl RealsenseDevice {
                         depth_image_buffer.save_with_format(&depth_path, image::ImageFormat::Png)
                             .with_context(|| format!("RS [{}]: Failed to save depth image to {:?}", name_clone, depth_path))?;
                         info!("RS [{}]: Saved depth image to {:?}", name_clone, depth_path);
-                        processed_depth_data = Some(RsDepthFrameData { depth_data: depth_data_slice_u16.to_vec(), depth_units: current_depth_units, path: depth_path, width, height });
+                        processed_depth_data = Some(RsDepthFrameData { depth_data: depth_data_slice_u16.to_vec(), depth_units: current_depth_units, width, height });
                     } else {
                         warn!("RS [{}]: Depth stream enabled, but no DepthFrame found in frameset.", name_clone);
                     }

@@ -17,7 +17,6 @@ use chrono::Utc;
 use futures::future::join_all;
 use chrono::DateTime;
 use std::sync::Barrier;
-use std::time::Instant;
 
 
 #[derive(Clone)]
